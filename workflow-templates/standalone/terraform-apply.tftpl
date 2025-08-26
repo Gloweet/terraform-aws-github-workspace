@@ -17,7 +17,7 @@ env:
   aws_region: eu-west-3
   tf_version: "1.12.1"
   TERRAFORM_APPROVERS: '${jsonencode(reviewers)}'
-  working_dir_tf: "terraform/live"
+  working_dir_tf: ${working_dir}/live
   tf_plugin_cache_dir: $${{ github.workspace }}/.terraform.d/plugin-cache
 
 concurrency:

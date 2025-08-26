@@ -164,3 +164,24 @@ resource "github_repository_file" "standalone_setup_tf_cache_action" {
     }
   )
 }
+
+resource "github_repository_file" "main_tf" {
+  count = var.standalone ? 1 : 0
+
+  repository          = local.repo.name
+  file                = "${var.repo.working_dir}/live/main.tf"
+  overwrite_on_create = true
+  content             = <<EOT
+resource "null_resource" "default" {
+  provisioner "local-exec" {
+    command = "echo 'Hello World'"
+  }
+}
+EOT
+  lifecycle {
+    ignore_changes = [
+      branch,
+      content
+    ]
+  }
+}
