@@ -1,11 +1,12 @@
 name: Setup AWS OIDC
 description: Configures AWS credentials and verifies identity.
+# Note: This action expects aws-role-arn and aws-region to be passed from environment variables/secrets
 inputs:
   aws-role-arn:
-    description: The ARN of the AWS role to assume
+    description: The ARN of the AWS role to assume (use environment secrets)
     required: true
   aws-region:
-    description: The AWS region to use
+    description: The AWS region to use (use environment variables)
     required: true
 
 runs:

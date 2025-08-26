@@ -27,7 +27,10 @@ env:
   working_dir_web: "${app_dir}"
   run_tests: "true"
   project_name: "${repo_name}"
-  # cloudfront_id: "XXXX1"
+  # Note: The following variables should be set in GitHub environments:
+  # - AWS_REGION (as a secret)
+  # - AWS_ROLE_ARN (as a secret)
+  # - CLOUDFRONT_ID (as a secret if needed)
 
 permissions:
   # Allows the workflow to request an OIDC token
@@ -96,6 +99,7 @@ jobs:
     name: Web Sync to S3
     needs: [Build]
     runs-on: ["${runs_on}"]
+    environment: ${environment}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -104,7 +108,7 @@ jobs:
         uses: ./.github/actions/setup-aws
         with:
           aws-role-arn: $${{ secrets.AWS_ROLE_ARN }}
-          aws-region: $${{ vars.AWS_REGION }}
+          aws-region: $${{ secrets.AWS_REGION }}
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -122,16 +126,17 @@ jobs:
           aws s3 sync web/dist s3://${environment}-$${{ env.project_name }}-primary
 
       - name: Invalidate CloudFront cache
-        if: $${{ env.CLOUDFRONT_ID }}
+        if: $${{ secrets.CLOUDFRONT_ID }}
         run: |
-          echo "Invalidating CloudFront distribution ID: $${{ env.CLOUDFRONT_ID }}"
-          aws cloudfront create-invalidation --distribution-id $${{ env.CLOUDFRONT_ID }} --paths '/*' || echo "⚠️ Cache invalidation failed, continuing anyway."
+          echo "Invalidating CloudFront distribution ID: $${{ secrets.CLOUDFRONT_ID }}"
+          aws cloudfront create-invalidation --distribution-id $${{ secrets.CLOUDFRONT_ID }} --paths '/*' || echo "⚠️ Cache invalidation failed, continuing anyway."
 
   Slack:
     name: Slack Notification
     needs: [Build, Sync]
     if: always()
     runs-on: ["${runs_on}"]
+    environment: ${environment}
 
     steps:
       - uses: technote-space/workflow-conclusion-action@v3
@@ -152,3 +157,4 @@ jobs:
             }
         env:
           SLACK_WEBHOOK_URL: $${{ secrets.SLACK_WEBHOOK_URL }}
+          ENVIRONMENT: ${environment}
