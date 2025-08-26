@@ -14,7 +14,6 @@ on:
 
 env:
   ENVIRONMENT: ${environment}
-  aws_region: eu-west-3
   tf_version: "1.12.1"
   TERRAFORM_APPROVERS: '${jsonencode(reviewers)}'
   working_dir_tf: ${working_dir}/live
@@ -35,6 +34,7 @@ jobs:
   Check:
     name: TF Check
     runs-on: ["${runs_on}"]
+    environment: ${environment}
 
     steps:
       - name: Checkout repository
@@ -54,6 +54,7 @@ jobs:
     name: TF Plan
     runs-on: ["${runs_on}"]
     needs: [Check]
+    environment: ${environment}
 
     steps:
       - name: Checkout repository
@@ -63,12 +64,7 @@ jobs:
         uses: ./.github/actions/setup-aws
         with:
           aws-role-arn: $${{ secrets.AWS_ROLE_ARN }}
-          aws-region: $${{ env.aws_region }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: $${{ env.tf_version }}
+          aws-region: $${{ vars.AWS_REGION }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -101,6 +97,7 @@ jobs:
     name: TF Apply
     runs-on: ["${runs_on}"]
     needs: [Plan]
+    environment: ${environment}
 
     steps:
       - uses: tspascoal/get-user-teams-membership@v3
@@ -140,12 +137,7 @@ jobs:
         uses: ./.github/actions/setup-aws
         with:
           aws-role-arn: $${{ secrets.AWS_ROLE_ARN }}
-          aws-region: $${{ env.aws_region }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: $${{ env.tf_version }}
+          aws-region: $${{ vars.AWS_REGION }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -153,11 +145,13 @@ jobs:
           terraform_version: $${{ env.tf_version }}
 
       - name: Download Terraform Plan
+        id: download-plan
         uses: actions/download-artifact@v4
         with:
           name: terraform-plan-${environment}
           path: $${{ env.working_dir_tf }}
-          fail-on-error: true
+          fail-on-error: false
+        continue-on-error: true
 
       - name: Terraform Init
         run: |
@@ -169,6 +163,19 @@ jobs:
           cd $${{ env.working_dir_tf }}
           echo "Using environment: $${environment}"
           terraform workspace select '$${environment}' || terraform workspace new '$${environment}'
+
+      - name: Terraform Plan (if artifact missing)
+        if: steps.download-plan.outcome != 'success'
+        env:
+          %{~ for var in vars }
+          TF_VAR_${var}: $${{ vars.${var} }}
+          %{ endfor }
+          %{~ for secret in secrets }
+          TF_VAR_${secret}: $${{ secrets.${secret} }}
+          %{ endfor }
+        run: |
+          cd $${{ env.working_dir_tf }}
+          terraform plan -out=tfplan -lock=true
 
       - name: Terraform Apply
         env:
@@ -186,7 +193,8 @@ jobs:
     name: Slack Notification
     needs: [Check, Plan, Apply]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ["${runs_on}"]
+    environment: ${environment}
 
     steps:
       - uses: technote-space/workflow-conclusion-action@v3
@@ -207,3 +215,4 @@ jobs:
             }
         env:
           SLACK_WEBHOOK_URL: $${{ secrets.SLACK_WEBHOOK_URL }}
+          ENVIRONMENT: ${environment}

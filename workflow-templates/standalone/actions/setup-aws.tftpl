@@ -17,6 +17,7 @@ runs:
       with:
         role-to-assume: $${{ inputs.aws-role-arn }}
         aws-region: $${{ inputs.aws-region }}
+        audience: sts.amazonaws.com
 
     - name: Verify IAM Role Assumption
       run: aws sts get-caller-identity

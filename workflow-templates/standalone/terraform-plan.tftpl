@@ -7,8 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  ENVIRONMENT: $${environment}
-  aws_region: eu-west-3
+  ENVIRONMENT: ${environment}
   tf_version: "1.12.1"
   working_dir_tf: ${working_dir}/live
   tf_plugin_cache_dir: $${{ github.workspace }}/.terraform.d/plugin-cache
@@ -28,6 +27,7 @@ jobs:
   Check:
     name: TF Check
     runs-on: ["${runs_on}"]
+    environment: ${environment}
 
     steps:
       - name: Checkout repository
@@ -47,6 +47,7 @@ jobs:
     name: TF Plan
     runs-on: ["${runs_on}"]
     needs: [Check]
+    environment: ${environment}
 
     steps:
       - name: Checkout repository
@@ -61,7 +62,7 @@ jobs:
         uses: ./.github/actions/setup-aws
         with:
           aws-role-arn: $${{ secrets.AWS_ROLE_ARN }}
-          aws-region: $${{ env.aws_region }}
+          aws-region: $${{ vars.AWS_REGION }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -89,3 +90,10 @@ jobs:
         run: |
           cd $${{ env.working_dir_tf }}
           terraform plan -out=tfplan -lock=false
+
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-${environment}
+          path: $${{ env.working_dir_tf }}/tfplan
+          retention-days: 1

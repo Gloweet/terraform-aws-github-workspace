@@ -28,9 +28,9 @@ env:
   run_tests: "true"
   project_name: "${repo_name}"
   # Note: The following variables should be set in GitHub environments:
-  # - AWS_REGION (as a secret)
+  # - AWS_REGION (as a variable)
   # - AWS_ROLE_ARN (as a secret)
-  # - CLOUDFRONT_ID (as a secret if needed)
+  # - CLOUDFRONT_ID (as a variable if needed)
 
 permissions:
   # Allows the workflow to request an OIDC token
@@ -108,7 +108,7 @@ jobs:
         uses: ./.github/actions/setup-aws
         with:
           aws-role-arn: $${{ secrets.AWS_ROLE_ARN }}
-          aws-region: $${{ secrets.AWS_REGION }}
+          aws-region: $${{ vars.AWS_REGION }}
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -126,10 +126,10 @@ jobs:
           aws s3 sync web/dist s3://${environment}-$${{ env.project_name }}-primary
 
       - name: Invalidate CloudFront cache
-        if: $${{ secrets.CLOUDFRONT_ID }}
+        if: $${{ vars.CLOUDFRONT_ID != '' }}
         run: |
-          echo "Invalidating CloudFront distribution ID: $${{ secrets.CLOUDFRONT_ID }}"
-          aws cloudfront create-invalidation --distribution-id $${{ secrets.CLOUDFRONT_ID }} --paths '/*' || echo "⚠️ Cache invalidation failed, continuing anyway."
+          echo "Invalidating CloudFront distribution ID: $${{ vars.CLOUDFRONT_ID }}"
+          aws cloudfront create-invalidation --distribution-id $${{ vars.CLOUDFRONT_ID }} --paths '/*' || echo "⚠️ Cache invalidation failed, continuing anyway."
 
   Slack:
     name: Slack Notification
