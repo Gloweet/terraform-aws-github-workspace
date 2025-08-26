@@ -1,0 +1,209 @@
+name: ${title(environment)} - Terraform Apply
+
+# Requires AWS federation based on the repo's name
+# Required secrets:
+# - AWS_ROLE_ARN
+# - ORG_TOKEN
+# - SLACK_WEBHOOK_URL
+
+on:
+  push:
+    branches:
+      - ${branch}
+  workflow_dispatch:
+
+env:
+  ENVIRONMENT: ${environment}
+  aws_region: eu-west-3
+  tf_version: "1.12.1"
+  TERRAFORM_APPROVERS: '${jsonencode(reviewers)}'
+  working_dir_tf: "terraform/live"
+  tf_plugin_cache_dir: $${{ github.workspace }}/.terraform.d/plugin-cache
+
+concurrency:
+  group: $${repo_name}-${environment}
+  cancel-in-progress: false
+
+permissions:
+  # Allows the workflow to request an OIDC token
+  id-token: write
+
+  # Required for actions/checkout
+  contents: read
+
+jobs:
+  Check:
+    name: TF Check
+    runs-on: ["${runs_on}"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: $${{ env.tf_version }}
+
+      - name: Terraform Format Check
+        run: |
+          cd $${{ env.working_dir_tf }}
+          terraform fmt -check -recursive
+
+  Plan:
+    name: TF Plan
+    runs-on: ["${runs_on}"]
+    needs: [Check]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup AWS
+        uses: ./.github/actions/setup-aws
+        with:
+          aws-role-arn: $${{ secrets.AWS_ROLE_ARN }}
+          aws-region: $${{ env.aws_region }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: $${{ env.tf_version }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: $${{ env.tf_version }}
+
+      - name: Terraform Init
+        run: |
+          cd $${{ env.working_dir_tf }}
+          terraform init
+
+      - name: Terraform Workspace
+        run: |
+          cd $${{ env.working_dir_tf }}
+          terraform workspace select '${environment}' || terraform workspace new '${environment}'
+
+      - name: Terraform Plan
+        env:
+          %{~ for var in vars }
+          TF_VAR_${var}: $${{ vars.${var} }}
+          %{ endfor }
+          %{~ for secret in secrets }
+          TF_VAR_${secret}: $${{ secrets.${secret} }}
+          %{ endfor }
+        run: |
+          cd $${{ env.working_dir_tf }}
+          terraform plan -out=tfplan -lock=true
+
+  Apply:
+    name: TF Apply
+    runs-on: ["${runs_on}"]
+    needs: [Plan]
+
+    steps:
+      - uses: tspascoal/get-user-teams-membership@v3
+        id: actorTeams
+        with:
+          username: $${{ github.actor }}
+          GITHUB_TOKEN: $${{ secrets.ORG_TOKEN }}
+
+      - name: Check commenter team membership
+        uses: actions/github-script@v6
+        env:
+          ENVIRONMENT: $${environment}
+          TERRAFORM_APPROVERS: $${{ vars.TERRAFORM_APPROVERS }}
+          ACTOR_TEAMS: $${{ steps.actorTeams.outputs.teams }}
+        with:
+          script: |
+            const core = require('@actions/core');
+
+            const approvedTeamsEnv = JSON.parse(process.env.TERRAFORM_APPROVERS || '[]');
+            const approvedTeams = approvedTeamsEnv.map(t => t.trim()).filter(Boolean).map(team => team.includes('/') ? team.split('/')[1] : team);
+
+            const actorTeamsEnv = JSON.parse(process.env.ACTOR_TEAMS || '[]');
+            const actorTeams = actorTeamsEnv.map(t => t.trim()).filter(Boolean).map(team => team.includes('/') ? team.split('/')[1] : team);
+
+            const matchedTeam = actorTeams.find(team => approvedTeams.includes(team));
+
+            if (matchedTeam) {
+                core.info(`✅ Terraform apply approved by @$${context.actor} (member of @$${matchedTeam}) for environment: $${process.env.ENVIRONMENT}`);
+            } else {
+                core.setFailed(`❌ @$${context.actor} is not authorized to approve Terraform apply. Must be in: $${approvedTeams.join(', ')}`);
+            }
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup AWS
+        uses: ./.github/actions/setup-aws
+        with:
+          aws-role-arn: $${{ secrets.AWS_ROLE_ARN }}
+          aws-region: $${{ env.aws_region }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: $${{ env.tf_version }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: $${{ env.tf_version }}
+
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan-${environment}
+          path: $${{ env.working_dir_tf }}
+          fail-on-error: true
+
+      - name: Terraform Init
+        run: |
+          cd $${{ env.working_dir_tf }}
+          terraform init --backend-config=backend-configs/${environment}.tf
+
+      - name: Terraform Workspace
+        run: |
+          cd $${{ env.working_dir_tf }}
+          echo "Using environment: $${environment}"
+          terraform workspace select '$${environment}' || terraform workspace new '$${environment}'
+
+      - name: Terraform Apply
+        env:
+          %{~ for var in vars }
+          TF_VAR_${var}: $${{ vars.${var} }}
+          %{ endfor }
+          %{~ for secret in secrets }
+          TF_VAR_${secret}: $${{ secrets.${secret} }}
+          %{ endfor }
+        run: |
+          cd $${{ env.working_dir_tf }}
+          terraform apply -auto-approve tfplan
+
+  Slack:
+    name: Slack Notification
+    needs: [Check, Plan, Apply]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: technote-space/workflow-conclusion-action@v3
+      - uses: 8398a7/action-slack@v3
+        if: env.WORKFLOW_CONCLUSION != 'skipped' && env.WORKFLOW_CONCLUSION != 'cancelled'
+        with:
+          status: custom
+          fields: workflow,job,commit,repo,ref,author,took
+          custom_payload: |
+            {
+              attachments: [{
+                color: '$${{ env.WORKFLOW_CONCLUSION }}' === 'success' ? 'good' : '$${{ env.WORKFLOW_CONCLUSION }}' === 'failure' ? 'danger' : 'warning',
+                text: `TF Apply of $${process.env.AS_REPO}@$${process.env.AS_REF} in *$${process.env.ENVIRONMENT}*
+                Status: $${process.env.WORKFLOW_CONCLUSION}
+                Author: $${process.env.AS_AUTHOR}
+                Commit: $${process.env.AS_COMMIT}`
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: $${{ secrets.SLACK_WEBHOOK_URL }}

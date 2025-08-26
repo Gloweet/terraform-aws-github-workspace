@@ -12,25 +12,25 @@ env:
   GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
   TF_WORKSPACE: happypathway
   TFE_TOKEN: ${{ secrets.TFE_TOKEN }}
-  
+
 jobs:
   setup-terraform:
     outputs:
       commit_sha: ${{ steps.checkout.outputs.commit }}
-        
+
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         id: checkout
-          
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3.1.2
         with:
-          terraform_version: ${{ vars.terraform_version }}
+          terraform_version: ${{ vars.TERRAFORM_VERSION }}
           cli_config_credentials_token: ${{ secrets.TFE_TOKEN }}
           cli_config_credentials_hostname: ${{ vars.terraform_api }}
-          
+
       - name: terraform init
         run: terraform init -upgrade
 
@@ -51,12 +51,12 @@ jobs:
           path: .terraform.lock.hcl
           retention-days: 1
           include-hidden-files: true
-          
+
   terraform-validate:
     needs: setup-terraform
     uses: HappyPathway/centralized-actions/.github/workflows/terraform-test.yml@main
     with:
-      terraform_version: ${{ vars.terraform_version }}
+      terraform_version: ${{ vars.TERRAFORM_VERSION }}
       terraform_api: ${{ vars.terraform_api }}
       github_username: ${{ github.actor }}
       github_email: ${{ github.actor }}@roknsound.com
@@ -70,7 +70,7 @@ jobs:
       TFE_TOKEN: ${{ secrets.TFE_TOKEN }}
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
       GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-     
+
   gtag:
     needs: terraform-validate
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'

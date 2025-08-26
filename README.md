@@ -1,17 +1,15 @@
-# terraform-github-workspace
+# terraform-aws-github-workspace
 
-A comprehensive Terraform module for configuring GitHub repositories with environments, branch policies, and CI/CD workflows.
-
-[![Terraform Validation](https://github.com/HappyPathway/terraform-github-workspace/actions/workflows/terraform.yaml/badge.svg)](https://github.com/HappyPathway/terraform-github-workspace/actions/workflows/terraform.yaml)
-
-## Overview
-
-This module automates the setup and configuration of GitHub repositories including:
-
+Need to bootstrap a github repository that includes Terraform IaC and needs access to AWS resources? This fork of [terraform-github-workspace](https://github.com/HappyPathway/terraform-github-workspace) automates the setup and configuration of GitHub repositories including:
 - GitHub environments with appropriate deployment reviews and branch protections
 - Terraform CI/CD workflows (plan and apply) specific to each environment
 - Integration with AWS S3 for Terraform state and workflow caching
 - GitHub Action secrets and environment variables
+
+
+This fork of [terraform-github-workspace](https://github.com/HappyPathway/terraform-github-workspace) adds support for:
+- a standalone mone for small teams. This creates all the necessary actions inside of the bootstraped repo (standalone != centralized)
+- AWS oidc connection federation
 
 ## Features
 
@@ -22,6 +20,27 @@ This module automates the setup and configuration of GitHub repositories includi
 - **Secret Management**: Environment-specific secrets and variables for GitHub Actions
 
 ## Usage
+
+1. If you don't have a shared tf state:
+- update bootstrap/main.tf accordingly
+- run:
+```bash
+cd bootstrap
+terraform init
+terraform apply
+```
+
+2. In your organization, create a team named 'terraform-approvers'.
+3. Create a personal access token
+On a GitHub account that is a member of your organization, create two personal access tokens.
+
+a. The first token is used here to setup the GitHub repository (github_token)
+It must be able to manage repositories, secrets and environment variables
+b. The first token must be able to read the organization's teams (org_token)
+
+4. Configure the github project to create
+
+Set `live/main.tf` accordingly.
 
 ```hcl
 locals {
@@ -39,9 +58,9 @@ resource "aws_s3_bucket" "cache_bucket" {
 
 module "github_actions" {
   source = "HappyPathway/workspace/github"
-  
+
   repo = local.repo
-  
+
   environments = [
     {
       name         = "development"
@@ -58,13 +77,16 @@ module "github_actions" {
         teams             = ["terraform-reviewers"]
       }
       deployment_branch_policy = {
-        branch = "main"
+        branches = "main"
         protected_branches = true
       }
     }
   ]
 }
 ```
+
+5. Run terraform plan
+If the organization is not set, try running `export GITHUB_OWNER=<your_organization>`
 
 ## Requirements
 

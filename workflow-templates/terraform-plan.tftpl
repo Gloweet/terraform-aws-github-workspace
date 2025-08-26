@@ -45,12 +45,13 @@ jobs:
         with:
           commit_sha: $${{ env.commit_sha }}
           checkout: false
-          terraform_version: $${{ vars.terraform_version }}
+          terraform_version: $${{ vars.TERRAFORM_VERSION }}
           workspace: ${environment}
           setup_terraform: true
           terraform_init: true
           backend_config: ${backend_config}
           cache_bucket: ${cache_bucket}
+          working_dir: ${working_dir}
         env:
           GITHUB_TOKEN: $${{ steps.github_credentials.outputs.github_token }}
           AWS_ACCESS_KEY_ID: $${{ steps.aws_auth.outputs.aws_access_key_id }}
@@ -63,7 +64,7 @@ jobs:
       - name: Terraform Plan
         uses: ${repo_org}/${terraform_plan}
         with:
-          terraform_version: $${{ vars.terraform_version }}
+          terraform_version: $${{ vars.TERRAFORM_VERSION }}
           workspace: ${environment}
           commit_sha: $${{ steps.terraform_init.outputs.commit_sha }}
           varfile: varfiles/${environment}.tfvars
@@ -71,6 +72,7 @@ jobs:
           download_cache: true
           cache_key: $${{ steps.terraform_init.outputs.s3_upload_path }}
           cache_bucket: ${cache_bucket}
+          working_dir: ${working_dir}
         env:
           AWS_ACCESS_KEY_ID: $${{ steps.aws_auth.outputs.aws_access_key_id }}
           AWS_SECRET_ACCESS_KEY: $${{ steps.aws_auth.outputs.aws_secret_access_key }}

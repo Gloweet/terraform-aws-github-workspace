@@ -1,0 +1,91 @@
+name: ${title(environment)} - Terraform Plan
+
+on:
+  pull_request:
+    branches:
+      - ${branch}
+  workflow_dispatch:
+
+env:
+  ENVIRONMENT: $${environment}
+  aws_region: eu-west-3
+  tf_version: "1.12.1"
+  working_dir_tf: "terraform/live"
+  tf_plugin_cache_dir: $${{ github.workspace }}/.terraform.d/plugin-cache
+
+concurrency:
+  group: $${repo_name}-${environment}
+  cancel-in-progress: false
+
+permissions:
+  # Allows the workflow to request an OIDC token
+  id-token: write
+
+  # Required for actions/checkout
+  contents: read
+
+jobs:
+  Check:
+    name: TF Check
+    runs-on: ["${runs_on}"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform Cache
+        uses: ./.github/actions/setup-tf-cache
+        with:
+          cache-path: $${{ env.tf_plugin_cache_dir }}
+
+      - name: Terraform Format Check
+        run: |
+          cd $${{ env.working_dir_tf }}
+          terraform fmt -check -recursive
+
+  Plan:
+    name: TF Plan
+    runs-on: ["${runs_on}"]
+    needs: [Check]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform Cache
+        uses: ./.github/actions/setup-tf-cache
+        with:
+          cache-path: $${{ env.tf_plugin_cache_dir }}
+
+      - name: Setup AWS
+        uses: ./.github/actions/setup-aws
+        with:
+          aws-role-arn: $${{ secrets.AWS_ROLE_ARN }}
+          aws-region: $${{ env.aws_region }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: $${{ env.tf_version }}
+
+      - name: Terraform Init
+        run: |
+          cd $${{ env.working_dir_tf }}
+          terraform init --backend-config=backend-configs/${environment}.tf
+
+      - name: Terraform Workspace
+        run: |
+          cd $${{ env.working_dir_tf }}
+          terraform workspace select '${environment}' || terraform workspace new '${environment}'
+
+      - name: Terraform Plan
+        env:
+          %{~ for var in vars }
+          TF_VAR_${var}: $${{ vars.${var} }}
+          %{ endfor }
+          %{~ for secret in secrets }
+          TF_VAR_${secret}: $${{ secrets.${secret} }}
+          %{ endfor }
+        run: |
+          cd $${{ env.working_dir_tf }}
+          terraform plan -out=tfplan -lock=false

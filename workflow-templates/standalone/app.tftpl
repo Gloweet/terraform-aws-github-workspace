@@ -1,0 +1,154 @@
+name: App Workflow
+# description: Build a React App and sync it on an AWS S3 bucket
+
+# Requires:
+# - a secret AWS_ROLE_ARN
+# - AWS federation based on the repo's name
+# - a build script per environment:
+#   "build:prod": "vite build --mode prod",
+#   "build:stg": "vite build --mode stg",
+#   "build:dev": "vite build --mode dev",
+#   "build": "vite build --mode prod",
+#
+# - a sync script per environment:
+#     "sync:prod": "npm run build:prod && aws s3 sync dist s3://prod-launchplate-react-primary && aws cloudfront create-invalidation --distribution-id XXXX1 --paths '/*'",
+#     "sync:stg": "aws s3 sync dist s3://stg-launchplate-react-primary && aws cloudfront create-invalidation --distribution-id XXXX2 --paths '/*'",
+#     "sync:dev": "aws s3 sync dist s3://dev-launchplate-react-primary && aws cloudfront create-invalidation --distribution-id XXXX3 --paths '/*'"
+
+on:
+  push:
+    branches:
+      - ${branch}
+  workflow_dispatch:
+
+env:
+  pnpm_version: 9
+  node_version: 18
+  working_dir_web: "${app_dir}"
+  run_tests: "true"
+  project_name: "${repo_name}"
+  # cloudfront_id: "XXXX1"
+
+permissions:
+  # Allows the workflow to request an OIDC token
+  id-token: write
+
+  # Required for actions/checkout
+  contents: read
+
+jobs:
+  Build:
+    name: App Build & Test
+    runs-on: ["${runs_on}"]
+    outputs:
+      app_version: $${{ steps.get_version.outputs.app_version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
+        with:
+          version: $${{ env.pnpm_version }}
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node_version: $${{ env.node_version }}
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: |
+          cd $${{ env.working_dir_web }}
+          pnpm install
+
+      - name: Run Vitest tests
+        if: $${{ env.run_tests == 'true' }}
+        run: |
+          cd $${{ env.working_dir_web }}
+          pnpm test
+        continue-on-error: true
+        env:
+          CI: true
+
+      - name: Get App version
+        # description: Get the version of the app from package.json
+        id: get_version
+        run: |
+          cd $${{ env.working_dir_web }}
+          APP_VERSION=$(node -p "require('./package.json').version")
+          echo "app_version=$APP_VERSION" >> $GITHUB_OUTPUT
+          echo "App Version: $APP_VERSION"
+
+      - name: Build project (defaults to prod config)
+        run: cd $${{ env.working_dir_web }} && npm run build:${environment}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: $${{ env.working_dir_web }}/dist
+          retention-days: 1
+
+  Sync:
+    name: Web Sync to S3
+    needs: [Build]
+    runs-on: ["${runs_on}"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup AWS
+        uses: ./.github/actions/setup-aws
+        with:
+          aws-role-arn: $${{ secrets.AWS_ROLE_ARN }}
+          aws-region: $${{ vars.AWS_REGION }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+
+      - name: Sync to S3 Release environment
+        run: |
+          aws s3 sync web/dist s3://${environment}-$${{ env.project_name }}-primary && \
+          aws s3 sync web/dist s3://${environment}-$${{ env.project_name }}-failover
+
+      - name: Sync to S3 Pre-release environment
+        run: |
+          aws s3 sync web/dist s3://${environment}-$${{ env.project_name }}-primary
+
+      - name: Invalidate CloudFront cache
+        if: $${{ env.CLOUDFRONT_ID }}
+        run: |
+          echo "Invalidating CloudFront distribution ID: $${{ env.CLOUDFRONT_ID }}"
+          aws cloudfront create-invalidation --distribution-id $${{ env.CLOUDFRONT_ID }} --paths '/*' || echo "⚠️ Cache invalidation failed, continuing anyway."
+
+  Slack:
+    name: Slack Notification
+    needs: [Build, Sync]
+    if: always()
+    runs-on: ["${runs_on}"]
+
+    steps:
+      - uses: technote-space/workflow-conclusion-action@v3
+      - uses: 8398a7/action-slack@v3
+        if: env.WORKFLOW_CONCLUSION != 'skipped' && env.WORKFLOW_CONCLUSION != 'cancelled'
+        with:
+          status: custom
+          fields: workflow,job,commit,repo,ref,author,took
+          custom_payload: |
+            {
+              attachments: [{
+                color: '$${{ env.WORKFLOW_CONCLUSION }}' === 'success' ? 'good' : '$${{ env.WORKFLOW_CONCLUSION }}' === 'failure' ? 'danger' : 'warning',
+                text: `App Deployment of $${process.env.AS_REPO}@$${process.env.AS_REF} in *$${process.env.ENVIRONMENT}*
+                Status: $${process.env.WORKFLOW_CONCLUSION}
+                Author: $${process.env.AS_AUTHOR}
+                Commit: $${process.env.AS_COMMIT}`
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: $${{ secrets.SLACK_WEBHOOK_URL }}

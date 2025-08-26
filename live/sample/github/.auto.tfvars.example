@@ -1,0 +1,5 @@
+github_token        = ""
+org_token           = ""
+github_organization = ""
+terraform_version   = "1.12.2"
+aws_role_arn        = "arn:aws:iam::<ID>:role/github-actions-production"

@@ -9,7 +9,7 @@ env:
   GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
   TF_WORKSPACE: happypathway
   TFE_TOKEN: ${{ secrets.TFE_TOKEN }}
-  
+
 jobs:
   tf-doc:
     runs-on: ubuntu-latest
@@ -19,17 +19,17 @@ jobs:
         id: checkout
         with:
           ref: ${{ github.event.pull_request.head.ref }}
-          
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3.1.2
         with:
-          terraform_version: ${{ vars.terraform_version }}
+          terraform_version: ${{ vars.TERRAFORM_VERSION }}
           cli_config_credentials_token: ${{ secrets.TFE_TOKEN }}
           cli_config_credentials_hostname: ${{ vars.terraform_api }}
-          
+
       - name: terraform init
         run: terraform init -upgrade
-        
+
       - name: Render terraform docs inside the README.md and push changes back to PR branch
         uses: terraform-docs/gh-actions@v1.2.0
         with:

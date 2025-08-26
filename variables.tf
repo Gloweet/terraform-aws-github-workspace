@@ -1,3 +1,27 @@
+variable "standalone" {
+  type    = bool
+  default = false
+}
+variable "github_token" {
+  type      = string
+  sensitive = true
+}
+variable "github_organization" {
+  type = string
+}
+# variable "github_app_id" {
+#   type      = string
+#   sensitive = true
+# }
+# variable "github_app_installation_id" {
+#   type      = string
+#   sensitive = true
+# }
+# variable "github_app_pem_file" {
+#   type      = string
+#   sensitive = true
+# }
+
 variable "composite_action_repos" {
   type = object({
     checkout        = optional(string, "gh-actions-checkout@v4")
@@ -150,6 +174,8 @@ variable "repo" {
       path    = string,
       content = string
     })), [])
+    working_dir = optional(string, ".")
+    app_dir     = optional(string, "app")
   })
   description = "Configuration for the GitHub repository"
 }

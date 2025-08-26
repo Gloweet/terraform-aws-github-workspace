@@ -57,26 +57,27 @@ jobs:
         with:
           commit_sha: $${{ env.commit_sha }}
           checkout: false
-          terraform_version: $${{ vars.terraform_version }}
+          terraform_version: $${{ vars.TERRAFORM_VERSION }}
           workspace: ${environment}
           backend_config: ${backend_config}
           setup_terraform: true
           terraform_init: true
           cache_bucket: ${cache_bucket}
+          working_dir: ${working_dir}
         env:
           GITHUB_TOKEN: $${{ steps.github_credentials.outputs.github_token }}
           AWS_ACCESS_KEY_ID: $${{ steps.aws_auth.outputs.aws_access_key_id }}
           AWS_SECRET_ACCESS_KEY: $${{ steps.aws_auth.outputs.aws_secret_access_key }}
           AWS_SESSION_TOKEN: $${{ steps.aws_auth.outputs.aws_session_token }}
-          HTTP_PROXY: $${{ vars.http_proxy }}
-          HTTPS_PROXY: $${{ vars.https_proxy}}
-          NO_PROXY: $${{ vars.no_proxy}}
+          # HTTP_PROXY: $${{ vars.http_proxy }}
+          # HTTPS_PROXY: $${{ vars.https_proxy}}
+          # NO_PROXY: $${{ vars.no_proxy}}
 
       - name: Terraform Plan
         id: terraform_plan
         uses: ${repo_org}/${terraform_plan}
         with:
-          terraform_version: $${{ vars.terraform_version }}
+          terraform_version: $${{ vars.TERRAFORM_VERSION }}
           workspace: ${environment}
           commit_sha: $${{ steps.terraform_init.outputs.commit_sha }}
           varfile: varfiles/${environment}.tfvars
@@ -84,6 +85,7 @@ jobs:
           setup_terraform: false
           cache_bucket: ${cache_bucket}
           cache_key: $${{ steps.terraform_init.outputs.s3_upload_path }}
+          working_dir: ${working_dir}
         env:
           AWS_ACCESS_KEY_ID: $${{ steps.aws_auth.outputs.aws_access_key_id }}
           AWS_SECRET_ACCESS_KEY: $${{ steps.aws_auth.outputs.aws_secret_access_key }}
@@ -91,9 +93,9 @@ jobs:
           GITHUB_TOKEN: $${{ steps.github_credentials.outputs.github_token }}
           GITHUB_OWNER: $${{ github.repository_owner }}
           GITHUB_BASE_URL: "$${{ github.server_url }}/"
-          HTTP_PROXY: $${{ vars.http_proxy }}
-          HTTPS_PROXY: $${{ vars.https_proxy}}
-          NO_PROXY: $${{ vars.no_proxy}}
+          # HTTP_PROXY: $${{ vars.http_proxy }}
+          # HTTPS_PROXY: $${{ vars.https_proxy}}
+          # NO_PROXY: $${{ vars.no_proxy}}
           %{~ for var in vars }
           TF_VAR_${var}: $${{ vars.${var} }}
           %{ endfor }
@@ -133,7 +135,7 @@ jobs:
       - name: Terraform Apply
         uses: ${repo_org}/${terraform_apply}
         with:
-          terraform_version: $${{ vars.terraform_version }}
+          terraform_version: $${{ vars.TERRAFORM_VERSION }}
           workspace: ${environment}
           commit_sha: $${{ needs.Plan.outputs.commit_sha }}
           download_cache: true
@@ -141,6 +143,7 @@ jobs:
           terraform_wrapper: false
           cache_bucket: ${cache_bucket}
           cache_key: $${{ needs.Plan.outputs.cache_key }}
+          working_dir: ${working_dir}
         env:
           AWS_ACCESS_KEY_ID: $${{ steps.aws_auth.outputs.aws_access_key_id }}
           AWS_SECRET_ACCESS_KEY: $${{ steps.aws_auth.outputs.aws_secret_access_key }}
@@ -148,9 +151,9 @@ jobs:
           GITHUB_TOKEN: $${{ steps.github_credentials.outputs.github_token }}
           GITHUB_OWNER: $${{ github.repository_owner }}
           GITHUB_BASE_URL: "$${{ github.server_url }}/"
-          HTTP_PROXY: $${{ vars.http_proxy }}
-          HTTPS_PROXY: $${{ vars.https_proxy}}
-          NO_PROXY: $${{ vars.no_proxy}}
+          # HTTP_PROXY: $${{ vars.http_proxy }}
+          # HTTPS_PROXY: $${{ vars.https_proxy}}
+          # NO_PROXY: $${{ vars.no_proxy}}
 
       - name: cleanup s3
         if: $${{ always() }}
@@ -159,5 +162,3 @@ jobs:
         with:
           cache_bucket: ${cache_bucket}
           cache_key: $${{ needs.Plan.outputs.cache_key }}
-     
-    

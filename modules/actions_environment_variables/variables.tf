@@ -41,3 +41,13 @@ variable "repo_name" {
     error_message = "Repository name must not be empty."
   }
 }
+
+variable "repo_org" {
+  type        = string
+  nullable    = true
+  description = "The organization of the repository"
+  validation {
+    condition     = length(var.repo_org) > 0
+    error_message = "Repository organization must not be empty."
+  }
+}

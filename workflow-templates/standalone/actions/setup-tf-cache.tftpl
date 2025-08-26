@@ -1,0 +1,22 @@
+name: Setup Terraform Plugin Cache
+description: Creates the Terraform plugin cache directory and enables caching.
+inputs:
+  cache-path:
+    description: The path to the Terraform plugin cache directory
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Create Terraform Plugin Cache Dir
+      run: mkdir -p $${{ inputs.cache-path }}
+      shell: bash
+
+    - name: Terraform Plugin Cache
+      uses: actions/cache@v4.2.3
+      with:
+        path: $${{ inputs.cache-path }}
+        key: $${{ runner.os }}-terraform-plugin-cache-$${{ hashFiles("**/.terraform.lock.hcl") }}

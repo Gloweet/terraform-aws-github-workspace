@@ -1,0 +1,22 @@
+name: Setup AWS OIDC
+description: Configures AWS credentials and verifies identity.
+inputs:
+  aws-role-arn:
+    description: The ARN of the AWS role to assume
+    required: true
+  aws-region:
+    description: The AWS region to use
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Configure AWS credentials via OIDC
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        role-to-assume: $${{ inputs.aws-role-arn }}
+        aws-region: $${{ inputs.aws-region }}
+
+    - name: Verify IAM Role Assumption
+      run: aws sts get-caller-identity
+      shell: bash

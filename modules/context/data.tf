@@ -3,8 +3,6 @@ data "github_user" "all_reviewers" {
   username = each.value
 }
 
-
-
 locals {
   org_teams = { for team in var.teams : team.name => team }
 }

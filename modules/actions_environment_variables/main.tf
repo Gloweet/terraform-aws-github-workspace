@@ -6,7 +6,6 @@ resource "github_actions_environment_secret" "secret" {
   repository      = var.repo_name
 }
 
-# Resource to create GitHub Actions environment variables
 resource "github_actions_environment_variable" "variable" {
   for_each      = tomap({ for _var in var.vars : _var.name => _var.value })
   environment   = var.environment
