@@ -1,6 +1,9 @@
 # terraform-aws-github-workspace
 
-Need to bootstrap a github repository that includes Terraform IaC and needs access to AWS resources? This fork of [terraform-github-workspace](https://github.com/HappyPathway/terraform-github-workspace) automates the setup and configuration of GitHub repositories including:
+Need to bootstrap a github repository that **supports Terraform workflows with access to AWS resources?**
+
+
+This project automates the setup and configuration of GitHub repositories including:
 - GitHub environments with appropriate deployment reviews and branch protections
 - Terraform CI/CD workflows (plan and apply) specific to each environment
 - Integration with AWS S3 for Terraform state and workflow caching
