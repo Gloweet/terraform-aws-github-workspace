@@ -11,8 +11,8 @@ This project automates the setup and configuration of GitHub repositories includ
 
 
 This fork of [terraform-github-workspace](https://github.com/HappyPathway/terraform-github-workspace) adds support for:
-- a standalone mone for small teams. This creates all the necessary actions inside of the bootstraped repo (standalone != centralized)
-- AWS oidc connection federation
+- a standalone mode for small teams. This creates all the necessary actions inside of the bootstrapped repo, instead of centralizing them in a single repository.
+- AWS OIDC connection federation
 
 ## Features
 
