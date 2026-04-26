@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(terraform -chdir=d:/git/terraform-aws-github-workspace/.terraform/modules providers schema -json)"
+    ]
+  }
+}

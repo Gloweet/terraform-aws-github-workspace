@@ -158,6 +158,7 @@ variable "repo" {
       slug = string
       id   = string
     })), [])
+    auto_init          = optional(bool, true)
     is_private         = optional(bool, false)
     is_template        = optional(bool, false)
     template_repo_org  = optional(string, null)

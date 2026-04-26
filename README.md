@@ -2,15 +2,15 @@
 
 Need to bootstrap a github repository that **supports Terraform workflows with access to AWS resources?**
 
-
 This project automates the setup and configuration of GitHub repositories including:
+
 - GitHub environments with appropriate deployment reviews and branch protections
 - Terraform CI/CD workflows (plan and apply) specific to each environment
 - Integration with AWS S3 for Terraform state and workflow caching
 - GitHub Action secrets and environment variables
 
-
 This fork of [terraform-github-workspace](https://github.com/HappyPathway/terraform-github-workspace) adds support for:
+
 - a standalone mode for small teams. This creates all the necessary actions inside of the bootstrapped repo, instead of centralizing them in a single repository.
 - AWS OIDC connection federation
 
@@ -25,8 +25,10 @@ This fork of [terraform-github-workspace](https://github.com/HappyPathway/terraf
 ## Usage
 
 1. If you don't have a shared tf state:
+
 - update bootstrap/main.tf accordingly
 - run:
+
 ```bash
 cd bootstrap
 terraform init
@@ -35,13 +37,24 @@ terraform apply
 
 2. In your organization, create a team named 'terraform-approvers'.
 3. Create a personal access token
-On a GitHub account that is a member of your organization, create two personal access tokens.
+   On a GitHub account that is a member of your organization, create two personal access tokens.
 
 a. The first token is used here to setup the GitHub repository (github_token)
 It must be able to manage repositories, secrets and environment variables
-b. The first token must be able to read the organization's teams (org_token)
 
-4. Configure the github project to create
+Go to GitHub Settings > Developer settings > Personal access tokens > Tokens (classic) > Generate new token (classic).
+
+Name it (e.g., "github_token for repo setup").
+
+Select scopes:
+
+- `repo` (full repo control, covers repo mgmt/secrets/vars)
+- `admin:org` for org secrets
+- `Workflows` to create default workflows
+
+b. The second token must have the `read:org` scope to read the organization's teams (org_token).
+
+1. Configure the github project to create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
 
 Set `live/main.tf` accordingly.
 
@@ -89,7 +102,7 @@ module "github_actions" {
 ```
 
 5. Run terraform plan
-If the organization is not set, try running `export GITHUB_OWNER=<your_organization>`
+   If the organization is not set, try running `export GITHUB_OWNER=<your_organization>`
 
 ## Requirements
 
@@ -134,5 +147,7 @@ The module generates GitHub Actions workflows that:
 - Support for custom GitHub Action composite actions
 
 <!-- BEGIN_TF_DOCS -->
+
 {{ .Content }}
+
 <!-- END_TF_DOCS -->

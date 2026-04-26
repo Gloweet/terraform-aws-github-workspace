@@ -1,5 +1,5 @@
 name: App Workflow
-# description: Build a React App and sync it on an AWS S3 bucket
+# description: Build a React App, sign the artifact with cosign, and sync it on an AWS S3 bucket
 
 # Requires:
 # - a secret AWS_ROLE_ARN
@@ -27,13 +27,15 @@ env:
   working_dir_web: "${app_dir}"
   run_tests: "true"
   project_name: "${repo_name}"
+  environment: "${environment}"
   # Note: The following variables should be set in GitHub environments:
   # - AWS_REGION (as a variable)
   # - AWS_ROLE_ARN (as a secret)
   # - CLOUDFRONT_ID (as a variable if needed)
+  # - IS_RELEASE (as a variable, "true" for prod-like envs with failover bucket)
 
 permissions:
-  # Allows the workflow to request an OIDC token
+  # Allows the workflow to request an OIDC token (required for cosign keyless signing)
   id-token: write
 
   # Required for actions/checkout
@@ -45,6 +47,7 @@ jobs:
     runs-on: ["${runs_on}"]
     outputs:
       app_version: $${{ steps.get_version.outputs.app_version }}
+      artifact_digest: $${{ steps.sign.outputs.artifact_digest }}
 
     steps:
       - name: Checkout repository
@@ -59,7 +62,7 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node_version: $${{ env.node_version }}
+          node-version: $${{ env.node_version }}
           cache: "pnpm"
 
       - name: Install dependencies
@@ -77,7 +80,6 @@ jobs:
           CI: true
 
       - name: Get App version
-        # description: Get the version of the app from package.json
         id: get_version
         run: |
           cd $${{ env.working_dir_web }}
@@ -85,14 +87,37 @@ jobs:
           echo "app_version=$APP_VERSION" >> $GITHUB_OUTPUT
           echo "App Version: $APP_VERSION"
 
-      - name: Build project (defaults to prod config)
+      - name: Build project
         run: cd $${{ env.working_dir_web }} && npm run build:${environment}
+
+      - name: Package build artifact
+        run: |
+          tar -czf web-dist.tar.gz -C $${{ env.working_dir_web }}/dist .
+          echo "ARTIFACT_SHA256=$(sha256sum web-dist.tar.gz | awk '{print $1}')" >> $GITHUB_ENV
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign build artifact (keyless via Sigstore)
+        id: sign
+        run: |
+          cosign sign-blob \
+            --yes \
+            --output-signature web-dist.tar.gz.sig \
+            --output-certificate web-dist.tar.gz.cert \
+            web-dist.tar.gz
+          DIGEST=$(sha256sum web-dist.tar.gz | awk '{print $1}')
+          echo "artifact_digest=$DIGEST" >> $GITHUB_OUTPUT
+          echo "Signed artifact digest: $DIGEST"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: web-dist
-          path: $${{ env.working_dir_web }}/dist
+          path: |
+            web-dist.tar.gz
+            web-dist.tar.gz.sig
+            web-dist.tar.gz.cert
           retention-days: 1
 
   Sync:
@@ -114,14 +139,34 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: web-dist
-          path: web/dist
+          path: artifact
 
-      - name: Sync to S3 Release environment
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Verify artifact signature
+        run: |
+          cosign verify-blob \
+            --signature artifact/web-dist.tar.gz.sig \
+            --certificate artifact/web-dist.tar.gz.cert \
+            --certificate-identity-regexp "https://github.com/$${GITHUB_REPOSITORY}/*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            artifact/web-dist.tar.gz
+          echo "Artifact signature verified successfully"
+
+      - name: Extract build artifact
+        run: |
+          mkdir -p web/dist
+          tar -xzf artifact/web-dist.tar.gz -C web/dist
+
+      - name: Sync to S3 (primary + failover for release environments)
+        if: $${{ vars.IS_RELEASE == 'true' }}
         run: |
           aws s3 sync web/dist s3://${environment}-$${{ env.project_name }}-primary && \
           aws s3 sync web/dist s3://${environment}-$${{ env.project_name }}-failover
 
-      - name: Sync to S3 Pre-release environment
+      - name: Sync to S3 (primary only for pre-release environments)
+        if: $${{ vars.IS_RELEASE != 'true' }}
         run: |
           aws s3 sync web/dist s3://${environment}-$${{ env.project_name }}-primary
 
@@ -152,7 +197,8 @@ jobs:
                 text: `App Deployment of $${process.env.AS_REPO}@$${process.env.AS_REF} in *$${process.env.ENVIRONMENT}*
                 Status: $${process.env.WORKFLOW_CONCLUSION}
                 Author: $${process.env.AS_AUTHOR}
-                Commit: $${process.env.AS_COMMIT}`
+                Commit: $${process.env.AS_COMMIT}
+                Artifact digest: $${{ needs.Build.outputs.artifact_digest }}`
               }]
             }
         env:

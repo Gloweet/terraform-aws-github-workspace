@@ -5,9 +5,7 @@ locals {
     var.allow_all_repos
     ? ["repo:${var.github_org}/*"]
     : [
-      "repo:${var.github_org}/${var.github_repo}:ref:refs/heads/*",
-      "repo:${var.github_org}/${var.github_repo}:ref:refs/tags/*",
-      "repo:${var.github_org}/${var.github_repo}:ref:refs/pull/*"
+      "repo:${var.github_org}/${var.github_repo}:*",
     ]
   )
 }
