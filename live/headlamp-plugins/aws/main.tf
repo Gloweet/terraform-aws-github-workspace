@@ -52,16 +52,23 @@ module "aws-federation-oidc" {
         Resource = "*"
       },
       {
-        Action   = "ecr:GetAuthorizationToken",
-        Effect   = "Allow",
-        Resource = "*",
         Sid      = "ECRAuth"
+        Effect   = "Allow"
+        Action   = "ecr:GetAuthorizationToken"
+        Resource = "*"
       },
       {
-        Action   = "ecr:*"
-        Effect   = "Allow"
-        Resource = "arn:aws:ecr::${local.aws_region}:${data.aws_caller_identity.current.account_id}:repository/${local.repo_name}",
-        Sid      = "ECRRepositoryFullAccess"
+        Sid    = "ECRRepositoryPushPull"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
+          "ecr:CompleteLayerUpload",
+          "ecr:InitiateLayerUpload",
+          "ecr:PutImage",
+          "ecr:UploadLayerPart"
+        ]
+        Resource = "arn:aws:ecr:${local.aws_region}:${data.aws_caller_identity.current.account_id}:repository/${local.repo_name}"
       }
     ]
   })
