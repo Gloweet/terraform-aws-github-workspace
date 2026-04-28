@@ -4,6 +4,13 @@ locals {
   aws_region          = "eu-west-3"
   github_organization = "Gloweet"
   repo_name           = "headlamp-plugins"
+  image_name          = var.image_name
+}
+
+variable "image_name" {
+  description = "Name of the ECR repository and Docker image"
+  type        = string
+  default     = "headlamp-plugins"
 }
 
 module "aws-federation-oidc" {
@@ -68,12 +75,25 @@ module "aws-federation-oidc" {
           "ecr:PutImage",
           "ecr:UploadLayerPart"
         ]
-        Resource = "arn:aws:ecr:${local.aws_region}:${data.aws_caller_identity.current.account_id}:repository/${local.repo_name}"
+        Resource = "arn:aws:ecr:${local.aws_region}:${data.aws_caller_identity.current.account_id}:repository/${local.image_name}"
       }
     ]
   })
 }
 
+resource "aws_ecr_repository" "this" {
+  name                 = local.image_name
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
 output "role_arn" {
   value = module.aws-federation-oidc.role_arn
+}
+
+output "ecr_repository_url" {
+  value = aws_ecr_repository.this.repository_url
 }
