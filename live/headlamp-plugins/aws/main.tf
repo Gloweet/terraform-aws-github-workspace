@@ -68,6 +68,8 @@ module "aws-federation-oidc" {
         Sid    = "ECRRepositoryPushPull"
         Effect = "Allow"
         Action = [
+          "ecr:ListImages",
+          "ecr:DescribeImages",
           "ecr:BatchCheckLayerAvailability",
           "ecr:BatchGetImage",
           "ecr:CompleteLayerUpload",
