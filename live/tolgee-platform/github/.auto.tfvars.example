@@ -1,0 +1,6 @@
+github_token        = ""
+org_token           = ""
+github_organization = "Gloweet"
+terraform_version   = "1.12.2"
+aws_role_arn        = "arn:aws:iam::<ID>:role/github-actions-production"
+ecr_repository_url  = "<ID>.dkr.ecr.eu-west-3.amazonaws.com/tolgee-platform"

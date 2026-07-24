@@ -36,6 +36,7 @@ terraform apply
 ```
 
 2. In your organization, create a team named 'terraform-approvers'.
+
 3. Create a personal access token
    On a GitHub account that is a member of your organization, create two personal access tokens.
 
@@ -52,9 +53,11 @@ Select scopes:
 - `admin:org` for org secrets
 - `Workflows` to create default workflows
 
-b. The second token must have the `read:org` scope to read the organization's teams (org_token).
+b. The second token must have the `read:org` scope to read the organization's teams.
 
-1. Configure the github project to create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
+Name it (e.g., "org_token for repo setup").
+
+1. Configure the github project to create the repo.
 
 Set `live/main.tf` accordingly.
 

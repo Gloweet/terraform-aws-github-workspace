@@ -1,0 +1,18 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../providers/terraform-provider-github/website/docs/r",
+			"name": "provider/github/resources"
+		},
+		{
+			"path": "../providers/terraform-provider-github/website/docs/d",
+			"name": "provider/github/data-sources"
+		},
+		{
+			"path": "../docs/terraform/website/docs/language"
+		},
+	]
+}

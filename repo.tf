@@ -4,7 +4,7 @@ data "github_repository" "repo" {
 }
 
 module "repo" {
-  source                  = "HappyPathway/repo/github"
+  source                  = "./modules/repo-github"
   count                   = var.repo.create_repo ? 1 : 0
   github_repo_description = var.repo.description
   github_auto_init        = var.repo.auto_init
