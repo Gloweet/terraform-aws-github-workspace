@@ -60,9 +60,9 @@ Collect from the user:
 - `aws_region` — AWS region (e.g. `eu-west-3`)
 - `environments` — list of environments to create (e.g. `production`, `staging`)
 - Whether this is a **standalone** deployment (recommended: `true`)
-- **What the app deploy target is** — this determines which app workflow to use (see Step 2 note below):
-  - React frontend → S3/CloudFront (`app_dir`, defaults to `app`) — matches the module's built-in `app.tftpl` template as-is
-  - Docker container → ECR — the built-in `app-<env>.yml` template does NOT fit this case (it's React/S3-specific); needs an ECR repo in the `aws` root and a hand-written Docker build/push workflow (see below)
+- **What the app deploy target is** — set via `repo.deploy_target` in the GitHub root (see Step 2 note below):
+  - `"s3"` (default) — React frontend → S3/CloudFront (`app_dir`, defaults to `app`)
+  - `"ecr"` — Docker container → ECR. Needs an ECR repo in the `aws` root (see below) plus `repo.ecr_image_name` (defaults to repo name), `ecr_dockerfile` (default `Dockerfile`), `ecr_docker_context` (default `.`), `ecr_use_submodules` (bool, for repos that vendor plugins/deps as git submodules), `ecr_cron_schedule` (cron string, e.g. `"0 0 1 * *"` for periodic rebuilds — empty disables it)
 
 ---
 
@@ -107,7 +107,15 @@ locals {
     repo_org    = "<github_org>"
     is_private  = true
     working_dir = "terraform"
-    app_dir     = "app"   # React app directory, if applicable
+    app_dir     = "app"   # React app directory, if deploy_target = "s3" (default)
+
+    # For Docker/ECR apps instead, set:
+    # deploy_target      = "ecr"
+    # ecr_image_name     = "<app_name>"   # optional, defaults to repo name
+    # ecr_dockerfile     = "Dockerfile"
+    # ecr_docker_context = "."
+    # ecr_use_submodules = false
+    # ecr_cron_schedule  = ""             # e.g. "0 0 1 * *" for periodic rebuilds
   }
 }
 ```
@@ -174,11 +182,11 @@ This creates:
 - Secrets and variables per environment
 - `.github/workflows/terraform-plan-<env>.yml`
 - `.github/workflows/terraform-apply-<env>.yml`
-- `.github/workflows/app-<env>.yml` (React → S3/CloudFront, with cosign signing; `overwrite_on_create = false` so it's only scaffolded once)
+- `.github/workflows/app-<env>.yml` — rendered from `app.tftpl` (React → S3/CloudFront, cosign signing) or `app-ecr.tftpl` (Docker → ECR, OIDC login via `setup-aws`), depending on `repo.deploy_target`. `overwrite_on_create = false` either way, so it's only scaffolded once and then owned by the target repo.
 - `.github/actions/setup-aws/action.yml`
 - `.github/actions/setup-tf-cache/action.yml`
 
-**Docker/ECR apps:** the auto-generated `app-<env>.yml` is a React/S3 placeholder and will not work for a containerized app — replace its content by hand with a Docker build → `docker push` to ECR workflow (mirror the cosign-signing structure of the original template: build, sign, then a separate deploy job gated on the environment). Since `overwrite_on_create = false`, Terraform will not clobber the hand-written version on subsequent `apply` runs.
+**Switching `deploy_target` after the repo already exists** does not retroactively rewrite `app-<env>.yml` (it's already been scaffolded and is hand-owned per above) — edit the workflow file directly in the target repo instead of re-applying Terraform for this.
 
 ---
 

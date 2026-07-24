@@ -177,6 +177,14 @@ variable "repo" {
     })), [])
     working_dir = optional(string, ".")
     app_dir     = optional(string, "app")
+
+    # App workflow deploy target: "s3" (React build -> S3/CloudFront, default) or "ecr" (Docker build -> ECR)
+    deploy_target      = optional(string, "s3")
+    ecr_image_name     = optional(string, null) # defaults to repo name if null
+    ecr_dockerfile     = optional(string, "Dockerfile")
+    ecr_docker_context = optional(string, ".")
+    ecr_use_submodules = optional(bool, false)
+    ecr_cron_schedule  = optional(string, "") # e.g. "0 0 1 * *"; empty disables the schedule trigger
   })
   description = "Configuration for the GitHub repository"
 }

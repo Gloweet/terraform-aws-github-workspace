@@ -1,0 +1,122 @@
+name: Build and Push Docker Image
+# description: Build a Docker image and push it to ECR, tagged by commit SHA and build date.
+
+# Requires:
+# - a secret AWS_ROLE_ARN
+# - AWS federation based on the repo's name
+# - vars.AWS_REGION
+# - an ECR repository named "${image_name}" (see live/<app>/aws/main.tf)
+# - a Dockerfile at "${dockerfile}" (build context: "${docker_context}")
+
+on:
+  push:
+    branches:
+      - ${branch}
+%{ if cron_schedule != "" }
+  schedule:
+    - cron: "${cron_schedule}"
+%{ endif }
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  AWS_REGION: $${{ vars.AWS_REGION }}
+
+jobs:
+%{ if use_submodules }
+  check-submodules:
+    name: Check submodule changes
+    runs-on: ["${runs_on}"]
+    outputs:
+      changed: $${{ steps.check.outputs.changed }}
+    steps:
+      - name: Checkout with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Check if submodules changed since last build
+        id: check
+        run: |
+          # On push to ${branch} or manual trigger, always build
+          if [ "$${{ github.event_name }}" = "push" ] || [ "$${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          # On schedule: compare current submodule SHAs to last snapshot tag
+          git submodule foreach --quiet 'echo $sha1' > /tmp/current_shas.txt
+          LAST_TAG=$(git tag --list 'submodule-snapshot-*' --sort=-version:refname | head -1)
+          if [ -z "$LAST_TAG" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            git show "$LAST_TAG:submodule_shas.txt" > /tmp/last_shas.txt 2>/dev/null || echo "" > /tmp/last_shas.txt
+            if diff -q /tmp/current_shas.txt /tmp/last_shas.txt > /dev/null 2>&1; then
+              echo "changed=false" >> $GITHUB_OUTPUT
+            else
+              echo "changed=true" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+%{ endif }
+  build:
+    name: Build and push Docker image
+%{ if use_submodules }
+    needs: check-submodules
+    if: needs.check-submodules.outputs.changed == 'true'
+%{ endif }
+    runs-on: ["${runs_on}"]
+    environment: ${environment}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+%{ if use_submodules }
+        with:
+          submodules: recursive
+%{ endif }
+
+      - name: Set image tag
+        id: tag
+        run: |
+          SHA_TAG="sha-$(git rev-parse --short HEAD)"
+          DATE_TAG="$(date -u +%Y%m%d%H%M%S)"
+          echo "sha_tag=$SHA_TAG" >> $GITHUB_OUTPUT
+          echo "date_tag=$DATE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Setup AWS
+        uses: ./.github/actions/setup-aws
+        with:
+          aws-role-arn: $${{ secrets.AWS_ROLE_ARN }}
+          aws-region: $${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push ${image_name}
+        uses: docker/build-push-action@v5
+        with:
+          context: ${docker_context}
+          file: ${dockerfile}
+          push: true
+          tags: |
+            $${{ steps.ecr-login.outputs.registry }}/${image_name}:latest
+            $${{ steps.ecr-login.outputs.registry }}/${image_name}:$${{ steps.tag.outputs.sha_tag }}
+            $${{ steps.ecr-login.outputs.registry }}/${image_name}:$${{ steps.tag.outputs.date_tag }}
+%{ if use_submodules }
+
+      - name: Tag submodule snapshot
+        if: github.event_name == 'schedule'
+        run: |
+          git submodule foreach --quiet 'echo $sha1' > submodule_shas.txt
+          SNAP_TAG="submodule-snapshot-$(date -u +%Y%m%d%H%M%S)"
+          git tag "$SNAP_TAG"
+          git push origin "$SNAP_TAG"
+%{ endif }

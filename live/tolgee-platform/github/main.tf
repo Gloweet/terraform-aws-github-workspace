@@ -6,6 +6,9 @@ locals {
     repo_org    = "Gloweet"
     is_private  = true
     working_dir = "terraform"
+
+    deploy_target  = "ecr"
+    ecr_image_name = "tolgee-platform"
   }
   secrets = [
     {

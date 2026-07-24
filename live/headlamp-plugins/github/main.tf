@@ -6,6 +6,11 @@ locals {
     repo_org    = "Gloweet"
     is_private  = true
     working_dir = "terraform"
+
+    deploy_target      = "ecr"
+    ecr_image_name     = "headlamp-plugins"
+    ecr_use_submodules = true
+    ecr_cron_schedule  = "0 0 1 * *"
   }
   secrets = [
     {

@@ -92,9 +92,9 @@ resource "github_repository_file" "standalone_apply" {
   }
 }
 
-# Resource to create a GitHub repository file for the App workflow
+# Resource to create a GitHub repository file for the App workflow (React -> S3/CloudFront)
 resource "github_repository_file" "standalone_app" {
-  for_each            = var.standalone ? tomap({ for env in var.environments : env.name => env }) : {}
+  for_each            = var.standalone && var.repo.deploy_target == "s3" ? tomap({ for env in var.environments : env.name => env }) : {}
   repository          = local.repo.name
   file                = ".github/workflows/app-${each.value.name}.yml"
   overwrite_on_create = false
@@ -127,6 +127,33 @@ resource "github_repository_file" "standalone_app" {
         [for secret in var.repo.secrets : secret.name],
         [for secret in each.value.secrets : secret.name]
       ))
+    }
+  )
+  branch = local.repo.default_branch
+  lifecycle {
+    ignore_changes = [
+      branch,
+    ]
+  }
+}
+
+# Resource to create a GitHub repository file for the App workflow (Docker -> ECR)
+resource "github_repository_file" "standalone_app_ecr" {
+  for_each            = var.standalone && var.repo.deploy_target == "ecr" ? tomap({ for env in var.environments : env.name => env }) : {}
+  repository          = local.repo.name
+  file                = ".github/workflows/app-${each.value.name}.yml"
+  overwrite_on_create = false
+  content = templatefile(
+    "${path.module}/workflow-templates/standalone/app-ecr.tftpl",
+    {
+      branch         = compact([each.value.deployment_branch_policy.branch, local.repo.default_branch])[0],
+      runs_on        = each.value.runner_group,
+      environment    = lookup(github_repository_environment.this, each.value.name).environment
+      image_name     = coalesce(var.repo.ecr_image_name, local.repo.name)
+      dockerfile     = var.repo.ecr_dockerfile
+      docker_context = var.repo.ecr_docker_context
+      use_submodules = var.repo.ecr_use_submodules
+      cron_schedule  = var.repo.ecr_cron_schedule
     }
   )
   branch = local.repo.default_branch
