@@ -42,3 +42,6 @@ live/assistant-flows-tf
 
 # Misc
 .DS_Store
+
+# Local per-machine agent-worktree dashboard config (workmux/webmux) — not shared via git
+.webmux.local.yaml
