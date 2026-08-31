@@ -1,0 +1,13 @@
+{
+  "enabledPlugins": {
+    "devops-skills@akin-ozer": true
+  },
+  "extraKnownMarketplaces": {
+    "akin-ozer": {
+      "source": {
+        "source": "github",
+        "repo": "akin-ozer/cc-devops-skills"
+      }
+    }
+  }
+}
