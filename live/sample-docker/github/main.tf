@@ -13,6 +13,11 @@ locals {
     # ecr_docker_context = "."
     # ecr_use_submodules = false
     # ecr_cron_schedule  = "0 0 1 * *" # periodic rebuilds
+
+    # AI harness (opencode agents + Agent Skills + scheduled workflows). Off by
+    # default. Enabling it needs repo-level secrets and vars (see the
+    # bootstrap-repo skill's "AI harness" step).
+    # ai_harness = true
   }
   secrets = [
     {

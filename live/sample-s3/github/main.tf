@@ -9,6 +9,11 @@ locals {
 
     deploy_target = "s3"
     app_dir       = "app"
+
+    # AI harness (opencode agents + Agent Skills + scheduled workflows). Off by
+    # default. Enabling it needs repo-level secrets and vars (see the
+    # bootstrap-repo skill's "AI harness" step).
+    # ai_harness = true
   }
   secrets = [
     {

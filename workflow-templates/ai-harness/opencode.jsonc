@@ -1,0 +1,48 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // Read-only Linear MCP: agents read the ticket behind an issue or PR so they
+  // work from its acceptance criteria instead of a paraphrase. Auth comes from
+  // the LINEAR_READ_ONLY_API_KEY secret (a Linear API key with only the Read
+  // permission). The /mcp/readonly endpoint exposes read tools only, so an
+  // instruction injected through a scanner message or a competitor page cannot
+  // mutate Linear state even if a prompt tried to.
+  //
+  // Writes never go through MCP. They go through scripts/linear.mjs, invoked as
+  // `node "$LINEAR_CLI"`, which exposes exactly two mutations - issueCreate and
+  // issueUpdate(stateId) - and no delete, project, comment or assignee tool.
+  "mcp": {
+    "linear": {
+      "type": "remote",
+      "url": "https://mcp.linear.app/mcp/readonly",
+      "oauth": false,
+      "headers": {
+        "Authorization": "Bearer {env:LINEAR_READ_ONLY_API_KEY}"
+      }
+    }
+  },
+
+  // MCP tools are exposed to every agent by default and cost context in every
+  // turn. Disable them globally and re-enable per agent below.
+  "tools": {
+    "linear_*": false
+  },
+
+  "agent": {
+    "review-coordinator": {
+      "tools": {
+        "linear_*": true
+      }
+    },
+    "develop-coordinator": {
+      "tools": {
+        "linear_*": true
+      }
+    },
+    "feature-brainstormer": {
+      "tools": {
+        "linear_*": true
+      }
+    }
+  }
+}

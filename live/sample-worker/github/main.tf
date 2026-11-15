@@ -10,6 +10,11 @@ locals {
     deploy_target = "worker"
     app_dir       = "app"
     # worker_compatibility_date = "2026-01-01"
+
+    # AI harness (opencode agents + Agent Skills + scheduled workflows). Off by
+    # default. Enabling it needs repo-level secrets and vars (see the
+    # bootstrap-repo skill's "AI harness" step).
+    # ai_harness = true
   }
   secrets = [
     {

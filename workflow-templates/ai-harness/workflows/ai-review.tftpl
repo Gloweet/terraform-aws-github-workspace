@@ -1,0 +1,92 @@
+name: AI PR Review
+
+# Reviews a pull request when it carries the `ai` label (the label the develop
+# workflow adds once its PR is ready) or when a human dispatches the workflow.
+# A synchronize event re-reviews only PRs that already carry the label.
+#
+# Read-only on the code: the only write is one review on the PR.
+#
+# The procedure lives in the review-pr skill
+# (.agents/skills/review-pr/SKILL.md); this file only decides when it runs.
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull request number to review"
+        required: true
+        type: string
+  pull_request:
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-review-$${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: AI review
+    if: $${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ai') }}
+    # Self-hosted runner: it can reach the LiteLLM gateway over the LAN.
+    runs-on: ${runs_on}
+    timeout-minutes: 45
+    permissions:
+      # Read the repo and the PR.
+      contents: read
+      # Post the review on the PR.
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Reviewing does not need write access to the repository.
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Setup opencode
+        id: opencode
+        uses: ./.github/actions/setup-opencode
+        with:
+          model: ${model}
+
+      - name: Build review prompt
+        id: prompt
+        env:
+          REPO: $${{ github.repository }}
+          PR: $${{ github.event.pull_request.number || inputs.pr_number }}
+        run: |
+          COMMON="Review pull request #$PR in $REPO. Follow the review-pr skill (.agents/skills/review-pr/SKILL.md) end to end: resolve the PR, read the diff, dispatch the review-* specialists whose trigger matches the changed files, consolidate their findings, and post ONE review with the approve / comment / request-changes decision they justify. Write the run summary to .opencode/agent-summary.md."
+
+          {
+            echo "body<<PROMPT_EOF"
+            echo "$COMMON"
+            echo "PROMPT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Review
+        env:
+          MODEL: $${{ steps.opencode.outputs.model }}
+          PROMPT: $${{ steps.prompt.outputs.body }}
+          LITELLM_MASTER_KEY: $${{ secrets.LITELLM_MASTER_KEY }}
+          GITHUB_TOKEN: $${{ secrets.GITHUB_TOKEN }}
+          LINEAR_READ_ONLY_API_KEY: $${{ secrets.LINEAR_READ_ONLY_API_KEY }}
+          LINEAR_TEAM_KEY: $${{ vars.LINEAR_TEAM_KEY || 'GLOW' }}
+        run: |
+          opencode run \
+            --model "$MODEL" \
+            --agent review-coordinator \
+            --auto \
+            --print-logs \
+            "$PROMPT"
+
+      - name: Mirror the agent summary into the run page
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -s .opencode/agent-summary.md ]; then
+            cat .opencode/agent-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "_review-coordinator produced no summary._" >> "$GITHUB_STEP_SUMMARY"
+          fi

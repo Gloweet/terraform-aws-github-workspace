@@ -1,7 +1,7 @@
 locals {
   repo = {
     name        = "hermes-workspace"
-    description = "Hermes agent custom image (CLI tools + Linear MCP), built and pushed to ECR"
+    description = "Hermes agent custom image (CLI tools), built and pushed to ECR"
     create_repo = true
     repo_org    = "Gloweet"
     is_private  = true

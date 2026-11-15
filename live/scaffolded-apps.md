@@ -14,7 +14,7 @@ Keep it current: adding a row here is the last step of every bootstrap.
 | `sample-s3`        | `live/sample-s3/`        | `s3`      | `production` (`main`) | `self-hosted`   | Minimal template, never applied                                           |
 | `sample-docker`    | `live/sample-docker/`    | `ecr`     | `production` (`main`) | `self-hosted`   | Minimal template, ECR repo + IAM in `aws/`, never applied                 |
 | `sample-worker`    | `live/sample-worker/`    | `worker`  | `production` (`main`) | `self-hosted`   | Minimal template for Cloudflare Workers, never applied                    |
-| `hermes-workspace` | `live/hermes-workspace/` | `ecr`     | `production` (`main`) | `self-hosted`   | Hermes agent image (`hermes-agent`), prepared 2026-11-15, apply pending   |
+| `hermes-workspace` | `live/hermes-workspace/` | `ecr`     | `production` (`main`) | `self-hosted`   | Hermes agent image (`hermes-agent`), applied 2026-11-15                   |
 
 Shared defaults across all apps: GitHub org `Gloweet`, AWS region `eu-west-3`,
 `standalone = true`, PAT auth (`github_token` + `org_token`), state bucket
@@ -52,10 +52,11 @@ GitHub-hosted minutes.
 
 - `deploy_target = "ecr"`, `ecr_image_name = "hermes-agent"`.
 - AWS role: `github-actions-hermes-workspace-production`.
-- Repo will host the custom `nousresearch/hermes-agent` image (CLI tools +
-  Linear MCP) used by the in-cluster Hermes agents in `Gloweet/gitops-demo`.
-- Prepared 2026-11-15; `apply` still pending (needs AWS IAM perms for the
-  `aws-federation-oidc` module plus a repo-admin GitHub PAT).
+- Repo hosts the custom `nousresearch/hermes-agent` image (CLI tools) used by
+  the in-cluster Hermes agents in `Gloweet/gitops-demo`. MCP servers are
+  configured per agent in `config.yaml` (`mcp_servers:`), not in the image.
+- Applied 2026-11-15 (ECR repo + GitHub repo). The first image still has to be
+  built and pushed before an agent can use it.
 
 ### sample-s3 / sample-docker / sample-worker
 

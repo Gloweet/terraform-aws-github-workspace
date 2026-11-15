@@ -1,0 +1,158 @@
+name: Develop Ticket
+
+# Carries a Linear ticket (or GitHub issue) to a pull request: resolve it, claim
+# it on Linear (In Progress, before anything else, so no other agent starts the
+# same ticket), implement it on a branch off ${branch}, run the repository's
+# real gates, review the diff with the specialist subagents, fix what they
+# report, then push and open a PR.
+#
+# Two entry points:
+#   - workflow_dispatch with `tickets` - one or more references, one PR each.
+#   - schedule - no references, so the agent picks a ticket itself from the
+#     team's To-do column (the state a human triaged as ready). An empty To-do
+#     column is a valid end state, not a reason to pick from another column.
+#
+# The procedure lives in the develop-ticket skill
+# (.agents/skills/develop-ticket/SKILL.md); the shared routing and the finding
+# contract are in .agents/AGENT-MANIFEST.md. This file only decides when it
+# runs, with which permissions, and on which model.
+#
+# Model routing and failover are owned by the LiteLLM gateway (see
+# .github/actions/setup-opencode): CI asks for one model and the gateway fails
+# over server-side, so there is no primary/fallback step here.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      tickets:
+        description: "Ticket reference(s), whitespace-separated - e.g. 'GLOW-152 #431'. Empty = pick the highest-priority ticket from To-do."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+# One run at a time. cancel-in-progress: false so a long run is never killed
+# halfway through - it would leave a ticket claimed with no PR, and the next run
+# would have to unpick that.
+concurrency:
+  group: develop-ticket
+  cancel-in-progress: false
+
+jobs:
+  develop:
+    # Self-hosted runner: it can reach the LiteLLM gateway (litellm.internal)
+    # over the LAN, which a GitHub-hosted runner cannot.
+    runs-on: ${runs_on}
+    timeout-minutes: 150
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+    env:
+      # Human-readable output language (run summary, PR body). Code, commit
+      # messages, branch names and PR titles stay in English.
+      AGENT_OUTPUT_LANGUAGE: $${{ vars.AGENT_OUTPUT_LANGUAGE || 'fr' }}
+      # Empty on a scheduled run, which is what tells the agent to pick its own
+      # ticket.
+      TICKETS: $${{ inputs.tickets }}
+    steps:
+      - name: Record start time
+        id: started
+        run: echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history: the agent branches off ${branch} and diffs against it.
+          fetch-depth: 0
+
+      - name: Fetch ${branch}
+        run: git fetch origin ${branch}
+
+      # Automated commits need a real identity, or the commit object is built
+      # with whatever git found on the runner (usually nothing).
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Setup opencode
+        id: opencode
+        uses: ./.github/actions/setup-opencode
+        with:
+          model: ${model}
+
+      # The agent branches off ${branch}, so after that step the checkout no
+      # longer contains this commit's files. Stage the Linear CLI outside the
+      # workspace now, while the tree is still this commit's.
+      - name: Stage the Linear CLI outside the working tree
+        run: cp scripts/linear.mjs "$RUNNER_TEMP/linear.mjs"
+
+      - name: Build develop prompt
+        id: prompt
+        env:
+          REPO: $${{ github.repository }}
+          TICKETS: $${{ inputs.tickets }}
+        run: |
+          if [ -n "$TICKETS" ]; then
+            SCOPE="Carry these ticket references to a pull request, in this order, one PR per ticket: $TICKETS."
+          else
+            SCOPE="This is the unattended run: no reference was given, so pick the ticket yourself from the team's To-do column, highest priority first. If that column is empty, write the empty summary and stop - do not pick from another column and do not invent work. If Linear is unreachable, fall back to the GitHub issue path and say so."
+          fi
+
+          COMMON="Run the develop pass on $REPO. $SCOPE Follow the develop-ticket skill (.agents/skills/develop-ticket/SKILL.md) end to end: resolve the ticket, claim it, implement it on a branch off ${branch}, run the repository's real gates, review your own diff with the relevant review-* specialists, fix what they report, then push and open a PR against ${branch}. Write what you did, and each gate's real result, into .opencode/agent-summary.md."
+
+          {
+            echo "body<<PROMPT_EOF"
+            echo "$COMMON"
+            echo "PROMPT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Develop ticket
+        env:
+          MODEL: $${{ steps.opencode.outputs.model }}
+          PROMPT: $${{ steps.prompt.outputs.body }}
+          LITELLM_MASTER_KEY: $${{ secrets.LITELLM_MASTER_KEY }}
+          GITHUB_TOKEN: $${{ secrets.GITHUB_TOKEN }}
+          LINEAR_READ_ONLY_API_KEY: $${{ secrets.LINEAR_READ_ONLY_API_KEY }}
+          # Read-write, reachable only through scripts/linear.mjs, whose only
+          # mutations are issueCreate and issueUpdate(stateId). Reads still go
+          # through the read-only Linear MCP.
+          LINEAR_API_KEY: $${{ secrets.LINEAR_API_KEY }}
+          LINEAR_TEAM_KEY: $${{ vars.LINEAR_TEAM_KEY || 'GLOW' }}
+          LINEAR_CLI: $${{ runner.temp }}/linear.mjs
+        run: |
+          opencode run \
+            --model "$MODEL" \
+            --agent develop-coordinator \
+            --auto \
+            --print-logs \
+            "$PROMPT"
+
+      # `always()` matters most here: a timeout mid-ticket is exactly the run
+      # someone needs to see.
+      - name: Mirror the agent summary into the run page
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -s .opencode/agent-summary.md ]; then
+            cat .opencode/agent-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "_develop-coordinator produced no summary._" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload agent report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-report-develop-ticket-$${{ github.run_id }}-$${{ github.run_attempt }}
+          path: |
+            .opencode/agent-summary.md
+            .opencode/scratchpad.md
+            .opencode/agent-state.json
+          if-no-files-found: warn
+          retention-days: 30
