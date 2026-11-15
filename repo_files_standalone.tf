@@ -14,7 +14,7 @@ resource "github_repository_file" "standalone_plan" {
       repo_org        = var.repo.repo_org,
       reviewers       = each.value.reviewers.teams,
       branch          = compact([each.value.deployment_branch_policy.branch, local.repo.default_branch])[0],
-      runs_on         = each.value.runner_group,
+      runs_on         = jsonencode(local.runs_on[each.value.name]),
       aws_auth        = var.composite_action_repos.aws_auth,
       gh_auth         = var.composite_action_repos.gh_auth,
       setup_terraform = var.composite_action_repos.setup_terraform,
@@ -61,7 +61,7 @@ resource "github_repository_file" "standalone_apply" {
       repo_org        = var.repo.repo_org,
       reviewers       = each.value.reviewers.teams,
       branch          = compact([each.value.deployment_branch_policy.branch, local.repo.default_branch])[0],
-      runs_on         = each.value.runner_group,
+      runs_on         = jsonencode(local.runs_on[each.value.name]),
       aws_auth        = var.composite_action_repos.aws_auth,
       gh_auth         = var.composite_action_repos.gh_auth,
       setup_terraform = var.composite_action_repos.setup_terraform,
@@ -105,7 +105,7 @@ resource "github_repository_file" "standalone_app" {
       repo_org        = var.repo.repo_org,
       reviewers       = each.value.reviewers.teams,
       branch          = compact([each.value.deployment_branch_policy.branch, local.repo.default_branch])[0],
-      runs_on         = each.value.runner_group,
+      runs_on         = jsonencode(local.runs_on[each.value.name]),
       aws_auth        = var.composite_action_repos.aws_auth,
       gh_auth         = var.composite_action_repos.gh_auth,
       setup_terraform = var.composite_action_repos.setup_terraform,
@@ -147,13 +147,37 @@ resource "github_repository_file" "standalone_app_ecr" {
     "${path.module}/workflow-templates/standalone/app-ecr.tftpl",
     {
       branch         = compact([each.value.deployment_branch_policy.branch, local.repo.default_branch])[0],
-      runs_on        = each.value.runner_group,
+      runs_on        = jsonencode(local.runs_on[each.value.name]),
       environment    = lookup(github_repository_environment.this, each.value.name).environment
       image_name     = coalesce(var.repo.ecr_image_name, local.repo.name)
       dockerfile     = var.repo.ecr_dockerfile
       docker_context = var.repo.ecr_docker_context
       use_submodules = var.repo.ecr_use_submodules
       cron_schedule  = var.repo.ecr_cron_schedule
+    }
+  )
+  branch = local.repo.default_branch
+  lifecycle {
+    ignore_changes = [
+      branch,
+    ]
+  }
+}
+
+# Resource to create a GitHub repository file for the App workflow (static site -> Cloudflare Worker)
+resource "github_repository_file" "standalone_app_worker" {
+  for_each            = var.standalone && var.repo.deploy_target == "worker" ? tomap({ for env in var.environments : env.name => env }) : {}
+  repository          = local.repo.name
+  file                = ".github/workflows/app-${each.value.name}.yml"
+  overwrite_on_create = false
+  content = templatefile(
+    "${path.module}/workflow-templates/standalone/app-worker.tftpl",
+    {
+      branch             = compact([each.value.deployment_branch_policy.branch, local.repo.default_branch])[0],
+      runs_on            = jsonencode(local.runs_on[each.value.name]),
+      environment        = lookup(github_repository_environment.this, each.value.name).environment
+      app_dir            = var.repo.app_dir
+      compatibility_date = var.repo.worker_compatibility_date
     }
   )
   branch = local.repo.default_branch

@@ -44,7 +44,7 @@ permissions:
 jobs:
   Build:
     name: App Build & Test
-    runs-on: ["${runs_on}"]
+    runs-on: ${runs_on}
     outputs:
       app_version: $${{ steps.get_version.outputs.app_version }}
       artifact_digest: $${{ steps.sign.outputs.artifact_digest }}
@@ -123,7 +123,7 @@ jobs:
   Sync:
     name: Web Sync to S3
     needs: [Build]
-    runs-on: ["${runs_on}"]
+    runs-on: ${runs_on}
     environment: ${environment}
     steps:
       - name: Checkout repository
@@ -180,7 +180,7 @@ jobs:
     name: Slack Notification
     needs: [Build, Sync]
     if: always()
-    runs-on: ["${runs_on}"]
+    runs-on: ${runs_on}
     environment: ${environment}
 
     steps:

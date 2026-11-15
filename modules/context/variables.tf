@@ -5,8 +5,10 @@ variable "environment" {
     prevent_self_review = optional(bool, false)  # Flag to prevent self review
     wait_timer          = optional(number, null) # Wait timer for review
     # Reviewers configuration
-    can_admins_bypass = optional(bool, true)            # Flag to allow admins to bypass
-    runner_group      = optional(string, "self-hosted") # Runner group
+    can_admins_bypass = optional(bool, true) # Flag to allow admins to bypass
+    # Runner labels used for `runs-on`: either a single label ("ubuntu-latest") or a
+    # list (["self-hosted", "linux", "x64"]).
+    runner_group = optional(any, "self-hosted")
     reviewers = optional(object({
       users             = optional(list(string), []) # List of user reviewers
       teams             = optional(list(string), []) # List of team reviewers

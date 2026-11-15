@@ -8,9 +8,16 @@ type: process
 
 Use this skill to provision a fully configured GitHub repository from scratch: AWS OIDC role, S3 state bucket, GitHub environments, branch protections, and auto-generated CI/CD workflows.
 
-## Step 0 — Find the Best Reference App
+## Step 0 — Pick the Reference App
 
-Before scaffolding, check `live/` for an existing app that's the closest match to what's being bootstrapped (same deploy target — Docker/ECR vs React/S3 — same org, etc.) and copy from it instead of `live/sample/`. `live/sample/` is a generic template; a real, already-applied app (e.g. `live/headlamp-plugins/`) reflects the conventions actually in use — including ones not fully captured below. In this repo, **`live/headlamp-plugins/` is the canonical working reference**: Gloweet org, eu-west-3, standalone mode, PAT-based auth, single `production` environment, and (if the app needs to publish a container image) an ECR repo defined alongside the OIDC role.
+**Read `live/scaffolded-apps.md` first.** It lists every app already provisioned
+(deploy target, environments, branches, runner, per-app quirks) and says which one to
+copy for each deploy target. Prefer copying a real, already-applied app under `live/` —
+it reflects the conventions actually in use, including ones not fully captured below.
+
+When no applied app matches, copy the minimal sample for the deploy target:
+`live/sample-s3/`, `live/sample-docker/` or `live/sample-worker/`, then adapt the
+`deploy_target` block described in Step 2.
 
 ## Step 1 — Check Prerequisites
 
@@ -18,7 +25,7 @@ Before doing anything, verify all prerequisites are met. Ask the user for each i
 
 ### 1a. GitHub auth — PAT vs GitHub App
 
-In practice, every app bootstrapped in this repo so far (`headlamp-plugins`, `sample`) uses **PAT-based auth** (`github_token` + `org_token` variables) — not a GitHub App. The GitHub App path exists in `providers.tf` as a commented-out alternative, with a note that app auth doesn't support setting repo environment variables/secrets, so token auth is required regardless. Default to asking for a PAT unless the user specifically wants app auth:
+In practice, every app bootstrapped in this repo so far (`headlamp-plugins`, `tolgee-platform`, `sample`) uses **PAT-based auth** (`github_token` + `org_token` variables) — not a GitHub App. The GitHub App path exists in `providers.tf` as a commented-out alternative, with a note that app auth doesn't support setting repo environment variables/secrets, so token auth is required regardless. Default to asking for a PAT unless the user specifically wants app auth:
 
 - `github_token` — PAT with repo-admin scope in the target org (creates the repo, sets up environments/secrets/workflows)
 - `org_token` — PAT with org read scope (used by the generated workflows themselves, e.g. to look up members/teams)
@@ -58,21 +65,70 @@ Collect from the user:
 - `app_name` — the new repo name (e.g. `my-new-service`)
 - `github_org` — GitHub organization name
 - `aws_region` — AWS region (e.g. `eu-west-3`)
-- `environments` — list of environments to create (e.g. `production`, `staging`)
 - Whether this is a **standalone** deployment (recommended: `true`)
 - **What the app deploy target is** — set via `repo.deploy_target` in the GitHub root (see Step 2 note below):
   - `"s3"` (default) — React frontend → S3/CloudFront (`app_dir`, defaults to `app`)
   - `"ecr"` — Docker container → ECR. Needs an ECR repo in the `aws` root (see below) plus `repo.ecr_image_name` (defaults to repo name), `ecr_dockerfile` (default `Dockerfile`), `ecr_docker_context` (default `.`), `ecr_use_submodules` (bool, for repos that vendor plugins/deps as git submodules), `ecr_cron_schedule` (cron string, e.g. `"0 0 1 * *"` for periodic rebuilds — empty disables it)
+  - `"worker"` — static site → Cloudflare Workers (static assets). Builds `app_dir` with pnpm, generates `wrangler.jsonc` on the runner, then `wrangler deploy`. Optional `repo.worker_compatibility_date` (default `2026-01-01`). Per environment, the GitHub Environment needs `WORKER_NAME`, `CLOUDFLARE_ACCOUNT_ID`, optionally `WORKER_ROUTE` (custom domain), and the `CLOUDFLARE_API_TOKEN` secret
+- **How many environments** (see 1e)
+
+Note: a `worker` app still needs the `aws` root. The generated `terraform-plan-*` /
+`terraform-apply-*` workflows always use the S3/DynamoDB backend and assume the
+`AWS_ROLE_ARN` role, so provision the OIDC role and state bucket even though the
+deploy itself only talks to Cloudflare.
+
+### 1e. Choose the environments
+
+Ask which of these to create, then wire each one to its own branch:
+
+| Environment  | Branch     | Notes                                              |
+| ------------ | ---------- | -------------------------------------------------- |
+| `production` | `main`     | required                                           |
+| `staging`    | `staging`  | optional; set `create_branch = true`               |
+| `develop`    | `develop`  | optional; set `create_branch = true`               |
+
+Each environment produces its own `terraform-plan-<env>.yml`, `terraform-apply-<env>.yml`
+and `app-<env>.yml`, triggered by that environment's branch.
+
+**Always set `deployment_branch_policy.branch` explicitly per environment.** When it is
+`null`, the module falls back to the repo default branch, so every environment ends up
+triggering on `main`. The commented `staging` block in each `live/sample-*/github/main.tf`
+shows the correct wiring. Also keep
+`restrict_branches = false` (as every existing app does) unless the non-default branches
+are protected, otherwise GitHub blocks deployments from `staging`/`develop`.
+
+### 1f. Runner
+
+Use the org-level **self-hosted runner** by default: it keeps GitHub-hosted minutes (and
+therefore cost) at zero. `runner_group` maps to the workflow's `runs-on` and accepts
+either a single label or a list of labels:
+
+```hcl
+runner_group = ["self-hosted", "linux", "x64"] # recommended: org-level self-hosted runner
+runner_group = "ubuntu-latest"                 # GitHub-hosted, only when the repo needs it
+```
+
+A self-hosted runner registered at the org level (the Gloweet org has one) matches on its
+labels — `self-hosted` plus the OS/arch labels it registered with (`linux`, `x64` by
+default). Add a custom label to the runner if you want jobs pinned to it.
+
+Prerequisites on a self-hosted runner used by these workflows: `git`, `curl`, `unzip`,
+the AWS CLI (used directly by `setup-aws` and by the S3 sync steps), Docker (only for
+`ecr` builds), and network access to github.com, AWS and Cloudflare. Node, pnpm and
+Terraform are installed by the actions themselves. Do not attach this
+runner to public repositories: `terraform-plan-<env>.yml` runs on `pull_request`, so
+fork PRs would execute untrusted code on it.
 
 ---
 
 ## Step 2 — Scaffold the Live Directories
 
-Create two directories by copying from the sample:
+Create two directories, copying from the reference app picked in Step 0 (the sample
+paths below are the fallback):
 
 ```
-live/<app_name>/aws/      ← copy from live/sample/aws/
-live/<app_name>/github/   ← copy from live/sample/github/
+live/<app_name>/aws/      ← copy from live/<reference-app>/aws/
+live/<app_name>/github/   ← copy from live/<reference-app>/github/
 ```
 
 ### Customize `live/<app_name>/aws/main.tf`
@@ -116,6 +172,11 @@ locals {
     # ecr_docker_context = "."
     # ecr_use_submodules = false
     # ecr_cron_schedule  = ""             # e.g. "0 0 1 * *" for periodic rebuilds
+
+    # For Cloudflare Workers instead, set:
+    # deploy_target             = "worker"
+    # app_dir                   = "app"        # the build output must land in app/dist
+    # worker_compatibility_date = "2026-01-01" # optional
   }
 }
 ```
@@ -125,9 +186,10 @@ Configure the `environments` list for each environment. Example minimum:
 ```hcl
 {
   name         = "production"
-  runner_group = "ubuntu-latest"
+  runner_group = ["self-hosted", "linux", "x64"] # recommended; "ubuntu-latest" if the runner can't be used
   cache_bucket = aws_s3_bucket.cache_bucket.bucket
   deployment_branch_policy = {
+    branch                   = "main"
     create_branch_protection = true
     restrict_branches        = false
   }
@@ -142,6 +204,12 @@ Configure the `environments` list for each environment. Example minimum:
   secrets = local.secrets
 }
 ```
+
+For `staging` / `develop`, duplicate the block with `branch = "staging"` /
+`branch = "develop"`, `create_branch = true`, and a distinct `key_prefix`. Give every
+environment its own values in `vars` — for a `worker` app that means a distinct
+`WORKER_NAME` (e.g. `<app>` vs `<app>-staging`) and its own `CLOUDFLARE_API_TOKEN` in
+`secrets` if it lives in a different Cloudflare account.
 
 Create `live/<app_name>/github/.auto.tfvars` from the example file and fill in all values.
 
@@ -182,7 +250,7 @@ This creates:
 - Secrets and variables per environment
 - `.github/workflows/terraform-plan-<env>.yml`
 - `.github/workflows/terraform-apply-<env>.yml`
-- `.github/workflows/app-<env>.yml` — rendered from `app.tftpl` (React → S3/CloudFront, cosign signing) or `app-ecr.tftpl` (Docker → ECR, OIDC login via `setup-aws`), depending on `repo.deploy_target`. `overwrite_on_create = false` either way, so it's only scaffolded once and then owned by the target repo.
+- `.github/workflows/app-<env>.yml` — rendered from `app.tftpl` (React → S3/CloudFront, cosign signing), `app-ecr.tftpl` (Docker → ECR, OIDC login via `setup-aws`) or `app-worker.tftpl` (static site → Cloudflare Workers, `wrangler.jsonc` generated on the runner), depending on `repo.deploy_target`. `overwrite_on_create = false` in all three cases, so it's only scaffolded once and then owned by the target repo.
 - `.github/actions/setup-aws/action.yml`
 - `.github/actions/setup-tf-cache/action.yml`
 
@@ -193,8 +261,10 @@ This creates:
 ## Post-bootstrap Checklist
 
 - [ ] Verify the repo was created at `github.com/<org>/<app_name>`
-- [ ] Confirm environments exist under repo Settings → Environments
+- [ ] Confirm environments exist under repo Settings → Environments, one per branch
 - [ ] Check that `AWS_ROLE_ARN` and `AWS_REGION` are set in each environment
-- [ ] Set `IS_RELEASE = true` in the environment variable for production-like environments (enables failover S3 bucket sync)
-- [ ] Set `CLOUDFRONT_ID` in the environment variable if a CloudFront distribution is used
-- [ ] Trigger the app workflow manually via `workflow_dispatch` to verify the cosign signing step passes
+- [ ] `deploy_target = "s3"`: set `IS_RELEASE = true` for production-like environments (enables failover S3 bucket sync) and `CLOUDFRONT_ID` if a distribution is used
+- [ ] `deploy_target = "worker"`: set `WORKER_NAME` and `CLOUDFLARE_ACCOUNT_ID` (vars), `CLOUDFLARE_API_TOKEN` (secret, Workers Scripts:Edit), and `WORKER_ROUTE` if using a custom domain
+- [ ] Self-hosted runner: confirm the job actually gets picked up (wrong labels leave it queued forever)
+- [ ] **Add the app to `live/scaffolded-apps.md`** — deploy target, environments + branches, runner, and anything unusual, so the next bootstrap can copy it
+- [ ] Trigger the app workflow manually via `workflow_dispatch` to verify the deploy (and, for `s3`, the cosign signing step) passes

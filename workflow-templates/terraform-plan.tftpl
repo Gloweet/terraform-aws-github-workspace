@@ -14,7 +14,7 @@ permissions: write-all
 
 jobs:
   Plan:
-    runs-on: ["${runs_on}"]
+    runs-on: ${runs_on}
 
     steps:
       - uses: ${repo_org}/${checkout}

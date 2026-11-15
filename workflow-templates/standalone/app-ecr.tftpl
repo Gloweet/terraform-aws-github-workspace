@@ -29,7 +29,7 @@ jobs:
 %{ if use_submodules }
   check-submodules:
     name: Check submodule changes
-    runs-on: ["${runs_on}"]
+    runs-on: ${runs_on}
     outputs:
       changed: $${{ steps.check.outputs.changed }}
     steps:
@@ -68,7 +68,7 @@ jobs:
     needs: check-submodules
     if: needs.check-submodules.outputs.changed == 'true'
 %{ endif }
-    runs-on: ["${runs_on}"]
+    runs-on: ${runs_on}
     environment: ${environment}
 
     steps:

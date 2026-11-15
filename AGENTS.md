@@ -18,7 +18,7 @@ This is a **Terraform module** that bootstraps GitHub repositories with:
 - Auto-generated CI/CD workflow files (plan/apply/app) committed directly into the target repo
 - S3 state backend + DynamoDB locking per environment
 
-It is used as a **module source** from `live/<app-name>/github/main.tf` — one directory per bootstrapped app.
+It is used as a **module source** from `live/<app-name>/github/main.tf` — one directory per bootstrapped app. `live/scaffolded-apps.md` inventories the apps already provisioned; read it before copying a template.
 
 ## Key Commands
 
@@ -71,16 +71,19 @@ Set `standalone = true` in the module call (recommended for small teams). This e
 - `standalone/terraform-plan.tftpl` / `terraform-apply.tftpl` — Terraform CI for each environment
 - `standalone/app.tftpl` — React app build → S3 sync → CloudFront invalidation (used when `repo.deploy_target = "s3"`, the default)
 - `standalone/app-ecr.tftpl` — Docker build → push to ECR, with optional git-submodule change detection and cron schedule (used when `repo.deploy_target = "ecr"`; set `repo.ecr_image_name`, `ecr_dockerfile`, `ecr_docker_context`, `ecr_use_submodules`, `ecr_cron_schedule`)
+- `standalone/app-worker.tftpl` — static site build → Cloudflare Workers (used when `repo.deploy_target = "worker"`; `wrangler.jsonc` is generated on the runner from `WORKER_NAME`, `CLOUDFLARE_ACCOUNT_ID`, optional `WORKER_ROUTE` and the `CLOUDFLARE_API_TOKEN` secret, configurable compatibility date via `repo.worker_compatibility_date`)
 - `standalone/actions/setup-aws.tftpl` / `setup-tf-cache.tftpl` — composite actions
 
-Both `app.tftpl` and `app-ecr.tftpl` render to the same file, `.github/workflows/app-<env>.yml`, gated by `repo.deploy_target` so only one is ever created — `overwrite_on_create = false` applies to both, so once scaffolded the file is owned by the target repo.
+The three `app*.tftpl` templates all render to the same file, `.github/workflows/app-<env>.yml`, gated by `repo.deploy_target` so only one is ever created — `overwrite_on_create = false` applies to all of them, so once scaffolded the file is owned by the target repo.
+
+`runs_on` in every template is rendered from `local.runs_on` (see `locals.tf`) via `jsonencode()`, so `runner_group` accepts either a label string (`"ubuntu-latest"`) or a label list (`["self-hosted", "linux", "x64"]`). Prefer the org-level self-hosted runner to avoid GitHub-hosted minutes.
 
 ### Adding a new app
 
-1. Copy `live/sample/aws/` → `live/<new-app>/aws/` (or copy an existing applied app like `live/headlamp-plugins/aws/` if it's a closer match, e.g. it also needs an ECR repo) and update locals
-2. Copy `live/sample/github/` → `live/<new-app>/github/` and update locals + environments
-3. Run AWS root first (outputs `role_arn`), then GitHub root
-4. The module auto-creates the repo, environments, branch protections, and pushes workflow files
+1. Read `live/scaffolded-apps.md` and copy the closest existing app, otherwise the matching `live/sample-<target>/` → `live/<new-app>/aws/` and `live/<new-app>/github/`, then update locals
+2. Run AWS root first (outputs `role_arn`), then GitHub root
+3. The module auto-creates the repo, environments, branch protections, and pushes workflow files
+4. Add the new app to `live/scaffolded-apps.md`
 
 ## Important conventions
 

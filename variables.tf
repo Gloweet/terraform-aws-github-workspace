@@ -49,8 +49,10 @@ variable "environments" {
     prevent_self_review = optional(bool, false)  # Flag to prevent self review
     wait_timer          = optional(number, null) # Wait timer for review
     # Reviewers configuration
-    can_admins_bypass = optional(bool, true)            # Flag to allow admins to bypass
-    runner_group      = optional(string, "self-hosted") # Runner group
+    can_admins_bypass = optional(bool, true) # Flag to allow admins to bypass
+    # Runner labels used for `runs-on`: either a single label ("ubuntu-latest") or a
+    # list (["self-hosted", "linux", "x64"]).
+    runner_group = optional(any, "self-hosted")
     reviewers = optional(object({
       users             = optional(list(string), []) # List of user reviewers
       teams             = optional(list(string), []) # List of team reviewers
@@ -178,13 +180,24 @@ variable "repo" {
     working_dir = optional(string, ".")
     app_dir     = optional(string, "app")
 
-    # App workflow deploy target: "s3" (React build -> S3/CloudFront, default) or "ecr" (Docker build -> ECR)
+    # App workflow deploy target:
+    # - "s3"     React build -> S3/CloudFront (default)
+    # - "ecr"    Docker build -> ECR
+    # - "worker" static site build -> Cloudflare Workers (static assets)
     deploy_target      = optional(string, "s3")
     ecr_image_name     = optional(string, null) # defaults to repo name if null
     ecr_dockerfile     = optional(string, "Dockerfile")
     ecr_docker_context = optional(string, ".")
     ecr_use_submodules = optional(bool, false)
     ecr_cron_schedule  = optional(string, "") # e.g. "0 0 1 * *"; empty disables the schedule trigger
+
+    # Cloudflare Workers settings (deploy_target = "worker")
+    worker_compatibility_date = optional(string, "2026-01-01")
   })
   description = "Configuration for the GitHub repository"
+
+  validation {
+    condition     = contains(["s3", "ecr", "worker"], var.repo.deploy_target)
+    error_message = "repo.deploy_target must be one of: s3, ecr, worker."
+  }
 }

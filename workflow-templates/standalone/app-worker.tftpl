@@ -1,0 +1,92 @@
+name: ${title(environment)} - Deploy Cloudflare Worker
+# description: Build a static site and deploy it to Cloudflare Workers (static assets).
+
+# Requires:
+# - a pnpm project in "${app_dir}" with a `build` script, a pnpm-lock.yaml, and
+#   build output in ${app_dir}/dist
+# - on the "${environment}" GitHub Environment:
+#   - vars.WORKER_NAME              unique worker name, e.g. "my-app" / "my-app-staging"
+#   - vars.CLOUDFLARE_ACCOUNT_ID
+#   - secrets.CLOUDFLARE_API_TOKEN  token with "Workers Scripts: Edit" for that account
+#   - vars.WORKER_ROUTE             optional custom domain, e.g. "app.example.com"
+#
+# wrangler.jsonc is generated on the runner from the values above and never
+# committed.
+
+on:
+  push:
+    branches:
+      - ${branch}
+  workflow_dispatch:
+
+env:
+  pnpm_version: 9
+  node_version: 20
+  working_dir_web: "${app_dir}"
+  environment: "${environment}"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: ${app_dir}
+
+jobs:
+  Deploy:
+    name: Build & Deploy
+    runs-on: ${runs_on}
+    environment: ${environment}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: $${{ env.pnpm_version }}
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: $${{ env.node_version }}
+          cache: "pnpm"
+          cache-dependency-path: $${{ env.working_dir_web }}/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Generate wrangler.jsonc
+        env:
+          WORKER_NAME: $${{ vars.WORKER_NAME }}
+          WORKER_ROUTE: $${{ vars.WORKER_ROUTE }}
+        run: |
+          node -e '
+            const { writeFileSync } = require("node:fs");
+
+            if (!process.env.WORKER_NAME) {
+              throw new Error("vars.WORKER_NAME is not set on this environment");
+            }
+
+            const config = {
+              name: process.env.WORKER_NAME,
+              compatibility_date: "${compatibility_date}",
+              assets: { directory: "./dist" },
+            };
+            if (process.env.WORKER_ROUTE) {
+              config.routes = [{ pattern: process.env.WORKER_ROUTE, custom_domain: true }];
+            }
+            writeFileSync("wrangler.jsonc", JSON.stringify(config, null, 2) + "\n");
+          '
+          cat wrangler.jsonc
+
+      - name: Deploy to Cloudflare Workers
+        run: npx --yes wrangler@4 deploy
+        env:
+          CLOUDFLARE_API_TOKEN: $${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: $${{ vars.CLOUDFLARE_ACCOUNT_ID }}

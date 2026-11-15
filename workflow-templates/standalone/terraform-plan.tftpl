@@ -26,7 +26,7 @@ permissions:
 jobs:
   Check:
     name: TF Check
-    runs-on: ["${runs_on}"]
+    runs-on: ${runs_on}
     environment: ${environment}
 
     steps:
@@ -45,7 +45,7 @@ jobs:
 
   Plan:
     name: TF Plan
-    runs-on: ["${runs_on}"]
+    runs-on: ${runs_on}
     needs: [Check]
     environment: ${environment}
 
