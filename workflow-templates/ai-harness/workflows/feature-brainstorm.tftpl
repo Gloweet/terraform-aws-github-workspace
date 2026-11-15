@@ -1,0 +1,129 @@
+name: Feature Brainstorm
+
+# Weekly survey of the repository, its issues and PRs, and the Linear board,
+# followed by 3-5 genuinely new feature ideas filed as Linear tickets in the
+# team's intake ("New") state. Quality over quantity: if every idea is already
+# on the board, the run files nothing and says so.
+#
+# Ideas land in Linear, not GitHub, because that is where the pipeline lives:
+# intake ("New") -> human triage -> To-do -> develop-ticket picks from To-do.
+# GitHub issues are the fallback when Linear is unreachable.
+#
+# The procedure lives in the feature-brainstorm skill
+# (.agents/skills/feature-brainstorm/SKILL.md); this file only decides when it
+# runs and with which credentials.
+on:
+  schedule:
+    - cron: "5 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: feature-brainstorm
+  cancel-in-progress: false
+
+jobs:
+  brainstorm:
+    # Self-hosted runner: it can reach the LiteLLM gateway over the LAN.
+    runs-on: ${runs_on}
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    env:
+      AGENT_OUTPUT_LANGUAGE: $${{ vars.AGENT_OUTPUT_LANGUAGE || 'fr' }}
+    steps:
+      - name: Record start time
+        id: started
+        run: echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The cron assumes the daily develop run already refreshed the board. A
+      # queued runner or a paused schedule breaks that silently, so check it and
+      # tell the agent - the brainstorm still runs either way.
+      - name: Check upstream cadence
+        id: cadence
+        continue-on-error: true
+        env:
+          GH_TOKEN: $${{ secrets.GITHUB_TOKEN }}
+        run: |
+          last=$(gh run list --workflow=develop-ticket.yml --status=success \
+            --limit 1 --json updatedAt --jq '.[0].updatedAt // empty' 2>/dev/null || true)
+          if [ -z "$last" ]; then
+            echo "note=No successful develop-ticket run was found." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          age_hours=$(( ( $(date +%s) - $(date -d "$last" +%s) ) / 3600 ))
+          if [ "$age_hours" -le 48 ]; then
+            echo "note=Last successful develop-ticket run: $${age_hours}h ago." >> "$GITHUB_OUTPUT"
+          else
+            echo "note=The daily develop-ticket run has not succeeded for $${age_hours}h; the board may be stale." >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup opencode
+        id: opencode
+        uses: ./.github/actions/setup-opencode
+        with:
+          model: ${model}
+
+      - name: Stage the Linear CLI outside the working tree
+        run: cp scripts/linear.mjs "$RUNNER_TEMP/linear.mjs"
+
+      - name: Build brainstorm prompt
+        id: prompt
+        env:
+          REPO: $${{ github.repository }}
+          CADENCE: $${{ steps.cadence.outputs.note }}
+        run: |
+          COMMON="Run this week's feature brainstorm for $REPO. Cadence check: $CADENCE Follow the feature-brainstorm skill (.agents/skills/feature-brainstorm/SKILL.md) end to end: survey all open and closed issues and PRs plus the Linear board, ground 3-5 new ideas in what you actually observe in the repository, deduplicate each one against existing issues, closed PRs and open Linear tickets (intake included), then file them as Linear tickets in the team's intake \"New\" state via the Linear CLI. Write the run summary to .opencode/agent-summary.md. If every idea is a duplicate, file nothing and say so."
+
+          {
+            echo "body<<PROMPT_EOF"
+            echo "$COMMON"
+            echo "PROMPT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Brainstorm
+        env:
+          MODEL: $${{ steps.opencode.outputs.model }}
+          PROMPT: $${{ steps.prompt.outputs.body }}
+          LITELLM_MASTER_KEY: $${{ secrets.LITELLM_MASTER_KEY }}
+          GITHUB_TOKEN: $${{ secrets.GITHUB_TOKEN }}
+          LINEAR_READ_ONLY_API_KEY: $${{ secrets.LINEAR_READ_ONLY_API_KEY }}
+          LINEAR_API_KEY: $${{ secrets.LINEAR_API_KEY }}
+          LINEAR_TEAM_KEY: $${{ vars.LINEAR_TEAM_KEY || 'GLOW' }}
+          LINEAR_CLI: $${{ runner.temp }}/linear.mjs
+        run: |
+          opencode run \
+            --model "$MODEL" \
+            --agent feature-brainstormer \
+            --auto \
+            --print-logs \
+            "$PROMPT"
+
+      - name: Mirror the agent summary into the run page
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -s .opencode/agent-summary.md ]; then
+            cat .opencode/agent-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "_feature-brainstormer produced no summary._" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload agent report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-report-feature-brainstorm-$${{ github.run_id }}-$${{ github.run_attempt }}
+          path: |
+            .opencode/agent-summary.md
+            .opencode/scratchpad.md
+          if-no-files-found: warn
+          retention-days: 30

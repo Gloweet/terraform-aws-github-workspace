@@ -1,0 +1,4 @@
+# Per-run state. Never committed: these are written by the agents, not authored.
+scratchpad.md
+agent-state.json
+agent-summary.md

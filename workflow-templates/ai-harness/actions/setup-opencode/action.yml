@@ -1,0 +1,183 @@
+name: "Setup opencode"
+description: "Install a pinned opencode CLI, ensure the runner has gh/jq, and point opencode at the LiteLLM gateway (which owns model routing + failover)"
+
+# Model routing lives in ONE place now: the LiteLLM proxy
+# (gitops-demo docs/proxmox/LITELLM_LXC_SETUP.md, router_settings.fallbacks).
+# CI no longer resolves a primary/fallback model pair, no longer carries
+# OPENCODE_GO_API_KEY / OPENROUTER_API_KEY, and no longer needs a fallback step —
+# the gateway fails over server-side. A job just asks for one model name.
+#
+# Requires on the runner (self-hosted LXC 115): outbound access to the gateway at
+# http://litellm.internal:4000 (resolved via /etc/hosts), plus `gh` and `jq`
+# (installed by the first step if missing).
+
+inputs:
+  version:
+    description: "opencode version to install (pinned for reproducibility - bump deliberately)"
+    required: false
+    default: "1.18.32"
+  model:
+    description: >-
+      Model id all CI steps should run, as `<provider>/<model>` for the LiteLLM
+      provider. Defaults to OpenCode Go (glm-5.2): CI has no Anthropic OAuth
+      token to forward, so `litellm/claude-sonnet-5` (which needs the caller's
+      Claude Code token) would 401 and always fall back — the gateway's own
+      credentials cover `opencode/*` and `openrouter/*` only.
+    required: false
+    default: "litellm/opencode/glm-5.2"
+  gateway-url:
+    description: "Base URL of the LiteLLM gateway's OpenAI-compatible API"
+    required: false
+    default: "http://litellm.internal:4000/v1"
+
+outputs:
+  model:
+    description: "The model id to pass to `opencode run --model`"
+    value: ${{ inputs.model }}
+
+runs:
+  using: composite
+  steps:
+    # A self-hosted runner does not ship the GitHub-hosted image's toolchain.
+    # `gh` is used by the agent coordinators to read/post on PRs; `jq` by the
+    # reporting scripts. Idempotent: a fresh runner self-heals, an existing one
+    # is a no-op.
+    - name: Ensure runner prerequisites (gh, jq)
+      shell: bash
+      run: |
+        missing=""
+        command -v gh >/dev/null 2>&1 || missing="$missing gh"
+        command -v jq >/dev/null 2>&1 || missing="$missing jq"
+        if [ -n "$missing" ]; then
+          echo "Installing missing runner tools:$missing"
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update -qq
+          if ! command -v jq >/dev/null 2>&1; then sudo apt-get install -y -qq jq; fi
+          if ! command -v gh >/dev/null 2>&1; then
+            sudo mkdir -p -m 755 /etc/apt/keyrings
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+              | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
+            sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+              | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq gh
+          fi
+        fi
+        gh --version | head -1
+        jq --version
+
+    # Single source of truth for the provider. `{env:LITELLM_MASTER_KEY}` is
+    # resolved by opencode at run time from the step's environment (the workflows
+    # pass it from a secret), so no key is written to disk here.
+    - name: Write opencode config (LiteLLM provider)
+      shell: bash
+      env:
+        GATEWAY_URL: ${{ inputs.gateway-url }}
+      run: |
+        conf_dir="$HOME/.config/opencode"
+        mkdir -p "$conf_dir"
+        cat > "$conf_dir/opencode.json" <<JSON
+        {
+          "\$schema": "https://opencode.ai/config.json",
+          "model": "${{ inputs.model }}",
+          "provider": {
+            "litellm": {
+              "npm": "@ai-sdk/openai-compatible",
+              "name": "LiteLLM",
+              "options": {
+                "baseURL": "${GATEWAY_URL}",
+                "apiKey": "{env:LITELLM_MASTER_KEY}"
+              },
+              "models": {
+                "claude-sonnet-5": { "name": "Claude Sonnet 5" },
+                "claude-opus-5": { "name": "Claude Opus 5" },
+                "opencode/deepseek-v4.1-flash": { "name": "DeepSeek v4.1 Flash (OpenCode Go)" },
+                "opencode/glm-5.2": { "name": "GLM-5.2 (OpenCode Go)" },
+                "openrouter/deepseek-flash": { "name": "DeepSeek v4.1 Flash (OpenRouter)" },
+                "openrouter/or-free": { "name": "OpenRouter Free" }
+              }
+            }
+          }
+        }
+        JSON
+        echo "wrote $conf_dir/opencode.json"
+        cat "$conf_dir/opencode.json"
+        # Fail loudly here rather than mid-agent if the gateway is unreachable.
+        code=$(curl -s -o /dev/null -w '%{http_code}' "${GATEWAY_URL%/v1}/health/liveliness" || true)
+        echo "litellm gateway reachable: ${code:-none}"
+        [ "$code" = "200" ] || echo "::warning::LiteLLM gateway not reachable at ${GATEWAY_URL} (got ${code:-none})"
+
+    # `id` is load-bearing: the install step below gates on
+    # steps.cache.outputs.cache-hit, and without an id that expression resolves to
+    # the empty string, so the cache was restored and then immediately overwritten
+    # by a fresh download on every single run.
+    - name: Cache opencode
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.opencode/bin
+        key: opencode-${{ runner.os }}-${{ runner.arch }}-${{ inputs.version }}
+
+    # Deliberately not `curl -fsSL https://opencode.ai/install | bash -s -- --version
+    # "$VERSION"`: that pipes a remote script straight into a shell with no
+    # integrity check, on a runner that holds LITELLM_MASTER_KEY, GITHUB_TOKEN and
+    # the Linear/MCP secrets, and whose `~/.opencode/bin` cache is reused by every
+    # later run - a compromised or modified install script would run once and then
+    # persist. Downloading the pinned release asset ourselves and checking it
+    # against a hash recorded here means a changed artifact fails the job loudly
+    # instead of executing.
+    #
+    # `linux-x64` only: the self-hosted runner is amd64, so the installer's
+    # baseline/musl variants never apply here. Bumping `version` requires updating
+    # this checksum in the same commit - recompute with `curl -fsSL -o o.tar.gz
+    # https://github.com/anomalyco/opencode/releases/download/v<version>/opencode-linux-x64.tar.gz
+    # && sha256sum o.tar.gz`. A mismatch fails the step rather than installing
+    # an unverified binary.
+    - name: Install opencode
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        EXPECTED_SHA256: "3046e0404fdc60fb80307e7a47824ba07477364178a4d09baa8548496dd6d43b"
+      run: |
+        install_dir="$HOME/.opencode/bin"
+        mkdir -p "$install_dir"
+        archive="$RUNNER_TEMP/opencode-linux-x64.tar.gz"
+        curl -fsSL -o "$archive" \
+          "https://github.com/anomalyco/opencode/releases/download/v${VERSION}/opencode-linux-x64.tar.gz"
+        echo "${EXPECTED_SHA256}  ${archive}" | sha256sum -c -
+        tar -xzf "$archive" -C "$install_dir" opencode
+        chmod +x "$install_dir/opencode"
+        rm -f "$archive"
+
+    # Runs unconditionally - NOT gated on cache-hit like the step above. The
+    # tarball checksum above only protects the cache-miss path; a poisoned or
+    # tampered `actions/cache` entry for this exact key would otherwise be
+    # trusted forever afterwards with no check beyond `opencode --version`
+    # printing the right string, on a runner holding every secret this
+    # workflow has. Checking the installed *binary's* hash here, every run,
+    # closes that gap regardless of which path populated it. Same rule as the
+    # tarball hash: bump together with `version` - recompute with
+    # `sha256sum ~/.opencode/bin/opencode` right after a clean install.
+    - name: Verify opencode binary integrity
+      shell: bash
+      env:
+        EXPECTED_BINARY_SHA256: "513f500a1a5ea1dc7d865547ac87b32a8936334e8d5abd5b3ff585c45a170080"
+      run: echo "${EXPECTED_BINARY_SHA256}  $HOME/.opencode/bin/opencode" | sha256sum -c -
+
+    - name: Add opencode to PATH
+      shell: bash
+      run: echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+    - name: Verify install
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        installed=$(opencode --version)
+        if [ "$installed" != "$VERSION" ]; then
+          echo "Expected opencode $VERSION, got $installed" >&2
+          exit 1
+        fi
+        echo "opencode $installed ready"

@@ -193,6 +193,14 @@ variable "repo" {
 
     # Cloudflare Workers settings (deploy_target = "worker")
     worker_compatibility_date = optional(string, "2026-01-01")
+
+    # AI harness: opencode agents, Agent Skills and the scheduled
+    # develop-ticket / feature-brainstorm workflows. Off by default. Enabling it
+    # requires the repo-level secrets and variables listed in the bootstrap
+    # skill (LiteLLM + Linear), and a runner that can reach the LiteLLM gateway.
+    ai_harness        = optional(bool, false)
+    ai_harness_runner = optional(any, ["self-hosted", "linux", "x64"])
+    ai_harness_model  = optional(string, "litellm/opencode/glm-5.2")
   })
   description = "Configuration for the GitHub repository"
 

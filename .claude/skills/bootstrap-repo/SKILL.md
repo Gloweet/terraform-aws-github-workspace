@@ -119,6 +119,48 @@ Terraform are installed by the actions themselves. Do not attach this
 runner to public repositories: `terraform-plan-<env>.yml` runs on `pull_request`, so
 fork PRs would execute untrusted code on it.
 
+### 1g. AI harness
+
+Ask: **"Do you want to set up an AI harness?"** It is opt-in (`repo.ai_harness`,
+default `false`).
+
+If yes, the module scaffolds the opencode harness into the target repo:
+
+- `.agents/skills/<name>/SKILL.md` — the procedures and the review checklists, in
+  **Agent Skills** format (`name` + `description` frontmatter, Markdown body).
+  Portable on purpose: opencode discovers `.agents/skills/` natively, and so does
+  any other Agent Skills client.
+- `.opencode/agents/` and `.opencode/commands/` — thin opencode agents (the
+  permission grant plus "follow the `<name>` skill") and the TUI entry points
+  `/ai-review`, `/ai-develop`, `/ai-autofix`.
+- `.opencode/opencode.jsonc` + `.opencode/.gitignore` — read-only Linear MCP and
+  the gitignored run state.
+- `scripts/linear.mjs`, `scripts/ai-model-run.sh`, `scripts/ai-autofix.sh`.
+- `.github/actions/setup-opencode/action.yml` — installs the pinned opencode CLI
+  and points it at the LiteLLM gateway.
+- `.github/workflows/develop-ticket.yml` (daily, ticket -> PR),
+  `feature-brainstorm.yml` (weekly, files ideas), `ai-review.yml` (PR labelled
+  `ai`).
+
+Prerequisites, all to confirm with the user:
+
+1. A Linear team/project the agent may write to. The user creates it; the
+   workflows default `LINEAR_TEAM_KEY` to `GLOW`.
+2. The LiteLLM gateway reachable from the runner. This is why
+   `ai_harness_runner` defaults to the self-hosted runner: the generated action
+   points at `http://litellm.internal:4000/v1`, which a GitHub-hosted runner
+   cannot reach.
+3. Repository-level (not per-environment) secrets: `LITELLM_MASTER_KEY`,
+   `LINEAR_API_KEY`, `LINEAR_READ_ONLY_API_KEY`.
+4. Repository-level variables: `LINEAR_TEAM_KEY` (default `GLOW`),
+   `AGENT_OUTPUT_LANGUAGE` (default `fr`).
+
+Put them in the `repo` object as `secrets` / `vars`, next to `ai_harness = true`.
+The harness files are written once (`overwrite_on_create = false` plus
+`ignore_changes = [content]`) and then owned by the target repo: tune the skills
+and agents there, not in Terraform. `ai_harness_model` defaults to
+`litellm/opencode/glm-5.2`; local runs use `litellm/claude-sonnet-5`.
+
 ---
 
 ## Step 2 — Scaffold the Live Directories
@@ -177,6 +219,23 @@ locals {
     # deploy_target             = "worker"
     # app_dir                   = "app"        # the build output must land in app/dist
     # worker_compatibility_date = "2026-01-01" # optional
+
+    # Opt-in AI harness (step 1g): opencode agents, Agent Skills and the
+    # scheduled develop-ticket / feature-brainstorm workflows.
+    # ai_harness        = true
+    # ai_harness_runner = ["self-hosted", "linux", "x64"]
+    # ai_harness_model  = "litellm/opencode/glm-5.2"
+    #
+    # Repository-level secrets/vars, required when ai_harness = true:
+    # secrets = [
+    #   { "name" = "LITELLM_MASTER_KEY", "value" = var.litellm_master_key },
+    #   { "name" = "LINEAR_API_KEY", "value" = var.linear_api_key },
+    #   { "name" = "LINEAR_READ_ONLY_API_KEY", "value" = var.linear_read_only_api_key },
+    # ]
+    # vars = [
+    #   { "name" = "LINEAR_TEAM_KEY", "value" = "GLOW" },
+    #   { "name" = "AGENT_OUTPUT_LANGUAGE", "value" = "fr" },
+    # ]
   }
 }
 ```
@@ -253,6 +312,9 @@ This creates:
 - `.github/workflows/app-<env>.yml` — rendered from `app.tftpl` (React → S3/CloudFront, cosign signing), `app-ecr.tftpl` (Docker → ECR, OIDC login via `setup-aws`) or `app-worker.tftpl` (static site → Cloudflare Workers, `wrangler.jsonc` generated on the runner), depending on `repo.deploy_target`. `overwrite_on_create = false` in all three cases, so it's only scaffolded once and then owned by the target repo.
 - `.github/actions/setup-aws/action.yml`
 - `.github/actions/setup-tf-cache/action.yml`
+- `ai_harness = true`: `.agents/skills/*`, `.opencode/*`, `scripts/linear.mjs`,
+  `scripts/ai-model-run.sh`, `scripts/ai-autofix.sh`, `.github/actions/setup-opencode/action.yml`
+  and the three harness workflows (see step 1g)
 
 **Switching `deploy_target` after the repo already exists** does not retroactively rewrite `app-<env>.yml` (it's already been scaffolded and is hand-owned per above) — edit the workflow file directly in the target repo instead of re-applying Terraform for this.
 
@@ -266,5 +328,6 @@ This creates:
 - [ ] `deploy_target = "s3"`: set `IS_RELEASE = true` for production-like environments (enables failover S3 bucket sync) and `CLOUDFRONT_ID` if a distribution is used
 - [ ] `deploy_target = "worker"`: set `WORKER_NAME` and `CLOUDFLARE_ACCOUNT_ID` (vars), `CLOUDFLARE_API_TOKEN` (secret, Workers Scripts:Edit), and `WORKER_ROUTE` if using a custom domain
 - [ ] Self-hosted runner: confirm the job actually gets picked up (wrong labels leave it queued forever)
+- [ ] `ai_harness = true`: create the Linear project, set the repository secrets/vars, confirm the runner can reach the LiteLLM gateway, then dispatch `develop-ticket.yml` once with a test ticket and check the PR it opens
 - [ ] **Add the app to `live/scaffolded-apps.md`** — deploy target, environments + branches, runner, and anything unusual, so the next bootstrap can copy it
 - [ ] Trigger the app workflow manually via `workflow_dispatch` to verify the deploy (and, for `s3`, the cosign signing step) passes

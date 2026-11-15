@@ -78,6 +78,28 @@ The three `app*.tftpl` templates all render to the same file, `.github/workflows
 
 `runs_on` in every template is rendered from `local.runs_on` (see `locals.tf`) via `jsonencode()`, so `runner_group` accepts either a label string (`"ubuntu-latest"`) or a label list (`["self-hosted", "linux", "x64"]`). Prefer the org-level self-hosted runner to avoid GitHub-hosted minutes.
 
+### AI harness (`repo_files_ai_harness.tf`)
+
+Opt-in via `repo.ai_harness = true`. Scaffolds an opencode harness into the target
+repo from `workflow-templates/ai-harness/`:
+
+- `.agents/skills/<name>/SKILL.md` — the procedures and review checklists, in
+  **Agent Skills** format (YAML `name` + `description`, Markdown body). opencode
+  discovers `.agents/skills/` natively, and so do other Agent Skills clients.
+- `.opencode/agents/` — thin opencode agents: the permission grant plus "follow
+  the `<name>` skill". `.opencode/commands/` holds `/ai-review`, `/ai-develop`,
+  `/ai-autofix`.
+- `scripts/linear.mjs` (the only Linear write path, two mutations), plus
+  `scripts/ai-model-run.sh`, `scripts/ai-autofix.sh` and
+  `.github/actions/setup-opencode/action.yml`.
+- Workflows: `develop-ticket.yml` (daily), `feature-brainstorm.yml` (weekly) and
+  `ai-review.yml` (PR labelled `ai`).
+
+Harness files are created once and then owned by the target repo
+(`overwrite_on_create = false` plus `ignore_changes = [content]`). The agents run
+through the LiteLLM gateway, so harness jobs use `ai_harness_runner` (self-hosted
+by default), not the deploy target's runner.
+
 ### Adding a new app
 
 1. Read `live/scaffolded-apps.md` and copy the closest existing app, otherwise the matching `live/sample-<target>/` → `live/<new-app>/aws/` and `live/<new-app>/github/`, then update locals
@@ -88,6 +110,10 @@ The three `app*.tftpl` templates all render to the same file, `.github/workflows
 ## Important conventions
 
 - `$${{ }}` in `.tftpl` files escapes to `${{ }}` in the rendered GitHub Actions YAML
+- Skills shipped into bootstrapped repos use the Agent Skills layout
+  (`.agents/skills/<name>/SKILL.md` with `name` + `description` frontmatter), not
+  a vendor-specific path. Keep a procedure in the skill; the `.opencode/agents/*.md`
+  files only carry permissions and point at it.
 - `overwrite_on_create = false` on `standalone_app` intentionally — app workflow is bootstrapped once and then owned by the target repo
 - `overwrite_on_create = true` on plan/apply/action files — always kept in sync by Terraform
 - Environment secrets/vars are defined in `live/<app>/github/main.tf` and passed into `var.environments[*].secrets` / `.vars`
