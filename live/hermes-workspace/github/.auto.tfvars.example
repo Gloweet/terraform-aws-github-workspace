@@ -1,0 +1,7 @@
+github_token        = ""
+org_token           = ""
+github_organization = "Gloweet"
+terraform_version   = "1.12.2"
+aws_region          = "eu-west-3"
+aws_role_arn        = "arn:aws:iam::<ACCOUNT_ID>:role/github-actions-hermes-workspace-production"
+ecr_repository_url  = "<ACCOUNT_ID>.dkr.ecr.eu-west-3.amazonaws.com/hermes-agent"

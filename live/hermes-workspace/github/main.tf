@@ -1,0 +1,122 @@
+locals {
+  repo = {
+    name        = "hermes-workspace"
+    description = "Hermes agent custom image (CLI tools + Linear MCP), built and pushed to ECR"
+    create_repo = true
+    repo_org    = "Gloweet"
+    is_private  = true
+    working_dir = "terraform"
+
+    deploy_target  = "ecr"
+    ecr_image_name = "hermes-agent"
+    # ecr_dockerfile     = "Dockerfile"
+    # ecr_docker_context = "."
+    # ecr_use_submodules = false
+    # ecr_cron_schedule  = "0 0 1 * *" # periodic rebuilds
+  }
+  secrets = [
+    {
+      "name"  = "AWS_ROLE_ARN"
+      "value" = var.aws_role_arn
+    },
+    {
+      # Used by the workflow to look up org members/teams
+      "name"  = "ORG_TOKEN"
+      "value" = var.org_token
+    }
+  ]
+  vars = [
+    {
+      "name"  = "TERRAFORM_VERSION"
+      "value" = var.terraform_version
+    },
+    {
+      "name"  = "AWS_REGION"
+      "value" = var.aws_region
+    },
+    {
+      "name"  = "ECR_REPOSITORY_URL"
+      "value" = var.ecr_repository_url
+    }
+  ]
+}
+
+resource "random_uuid" "bucket_id" {}
+
+resource "aws_s3_bucket" "cache_bucket" {
+  bucket = lower("${local.repo.repo_org}-${local.repo.name}-${random_uuid.bucket_id.result}")
+}
+
+module "state" {
+  source              = "../../../modules/bootstrap-state"
+  region              = "eu-west-3"
+  state_bucket_name   = lower("${local.repo.repo_org}-${local.repo.name}-tfstate")
+  dynamodb_table_name = lower("${local.repo.repo_org}-${local.repo.name}-tfstate-locks")
+  tags = {
+    Project   = local.repo.name
+    ManagedBy = "Terraform"
+  }
+}
+
+module "github_actions" {
+  source              = "../../.."
+  standalone          = true
+  repo                = local.repo
+  github_organization = var.github_organization
+  github_token        = var.github_token
+  environments = [
+    {
+      name                = "production"
+      prevent_self_review = false
+      can_admins_bypass   = true
+      runner_group        = ["self-hosted", "linux", "x64"] # recommended: no GitHub-hosted minutes
+      cache_bucket        = aws_s3_bucket.cache_bucket.bucket
+      reviewers = {
+        enforce_reviewers = false // activation requires a paid plan
+        teams             = ["terraform-approvers"]
+      }
+      deployment_branch_policy = {
+        branch                   = "main"
+        create_branch_protection = true
+        restrict_branches        = false
+      }
+      state_config = {
+        key_prefix     = "production"
+        bucket         = lower("${local.repo.repo_org}-${local.repo.name}-tfstate")
+        region         = "eu-west-3"
+        dynamodb_table = lower("${local.repo.repo_org}-${local.repo.name}-tfstate-locks")
+        set_backend    = true
+      }
+      vars    = local.vars
+      secrets = local.secrets
+    },
+    # Optional staging environment. Always set `branch` explicitly, otherwise it
+    # falls back to the default branch and both environments deploy on main.
+    # {
+    #   name                = "staging"
+    #   prevent_self_review = false
+    #   can_admins_bypass   = true
+    #   runner_group        = ["self-hosted", "linux", "x64"]
+    #   cache_bucket        = aws_s3_bucket.cache_bucket.bucket
+    #   reviewers = {
+    #     enforce_reviewers = false
+    #     teams             = ["terraform-approvers"]
+    #   }
+    #   deployment_branch_policy = {
+    #     branch                   = "staging"
+    #     create_branch            = true
+    #     create_branch_protection = true
+    #     restrict_branches        = false
+    #   }
+    #   state_config = {
+    #     key_prefix     = "staging"
+    #     bucket         = lower("${local.repo.repo_org}-${local.repo.name}-tfstate")
+    #     region         = "eu-west-3"
+    #     dynamodb_table = lower("${local.repo.repo_org}-${local.repo.name}-tfstate-locks")
+    #     set_backend    = true
+    #   }
+    #   vars    = local.vars
+    #   secrets = local.secrets
+    # }
+  ]
+}
